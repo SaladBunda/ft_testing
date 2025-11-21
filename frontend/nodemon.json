@@ -1,0 +1,25 @@
+{
+  "watch": [
+    "app",
+    "context",
+    "lib",
+    "types",
+    "next.config.mjs",
+    "tsconfig.json"
+  ],
+  "ext": "ts,tsx,js,jsx,json,mjs",
+  "ignore": [
+    "node_modules",
+    ".next",
+    "out",
+    "dist"
+  ],
+  "delay": 1000,
+  "env": {
+    "NODE_ENV": "development"
+  }
+}
+
+
+
+

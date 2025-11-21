@@ -1,0 +1,10 @@
+{
+  "watch": ["src/**/*", "plugins/**/*", "config.js"],
+  "ignore": ["db/**/*", "*.db", "*.db-*", "node_modules"],
+  "ext": "js,json",
+  "legacyWatch": true,
+  "delay": 500,
+  "env": {
+    "NODE_ENV": "development"
+  }
+}

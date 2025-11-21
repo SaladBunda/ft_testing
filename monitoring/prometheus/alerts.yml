@@ -1,0 +1,326 @@
+groups:
+  - name: service-availability
+    interval: 30s
+    rules:
+      - alert: ServiceDown
+        expr: up{job!="prometheus"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: '{{ $labels.service }}'
+        annotations:
+          summary: 'Service {{ $labels.service }} is down'
+          description: 'Service "{{ $labels.service }}" (job: {{ $labels.job }}, instance: {{ $labels.instance }}) has been down for more than 1 minute.'
+
+      - alert: ServiceUnavailable
+        expr: up{job!="prometheus"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          service: '{{ $labels.service }}'
+        annotations:
+          summary: 'Service {{ $labels.service }} unavailable for extended period'
+          description: 'Service "{{ $labels.service }}" has been unavailable for more than 5 minutes. Immediate attention required.'
+
+  - name: http-performance
+    interval: 30s
+    rules:
+      - alert: HighServerErrorRate
+        expr: |
+          (
+            sum(rate(http_request_duration_seconds_count{status_code=~"5.."}[5m])) by (service)
+            /
+            sum(rate(http_request_duration_seconds_count[5m])) by (service)
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+          service: '{{ $labels.service }}'
+        annotations:
+          summary: 'High 5xx error rate for service {{ $labels.service }}'
+          description: 'Service "{{ $labels.service }}" has 5xx error rate of {{ $value }} (threshold: 0.05 = 5%)'
+
+      - alert: HighClientErrorRate
+        expr: |
+          (
+            sum(rate(http_request_duration_seconds_count{status_code=~"4.."}[5m])) by (service)
+            /
+            sum(rate(http_request_duration_seconds_count[5m])) by (service)
+          ) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          service: '{{ $labels.service }}'
+        annotations:
+          summary: 'High 4xx error rate for service {{ $labels.service }}'
+          description: 'Service "{{ $labels.service }}" has 4xx error rate of {{ $value }} (threshold: 0.1 = 10%)'
+
+      - alert: HighRequestLatencyP95
+        expr: |
+          histogram_quantile(0.95, 
+            sum(rate(http_request_duration_seconds_bucket{service!=""}[5m])) by (service, le)
+          ) > 1
+        for: 5m
+        labels:
+          severity: warning
+          service: '{{ $labels.service }}'
+        annotations:
+          summary: 'High p95 latency for service {{ $labels.service }}'
+          description: 'Service "{{ $labels.service }}" has 95th percentile latency of {{ printf "%.2f" $value }}s (threshold: 1s)'
+
+      - alert: HighRequestLatencyP99
+        expr: |
+          histogram_quantile(0.99, 
+            sum(rate(http_request_duration_seconds_bucket{service!=""}[5m])) by (service, le)
+          ) > 3
+        for: 5m
+        labels:
+          severity: critical
+          service: '{{ $labels.service }}'
+        annotations:
+          summary: 'High p99 latency for service {{ $labels.service }}'
+          description: 'Service "{{ $labels.service }}" has 99th percentile latency of {{ printf "%.2f" $value }}s (threshold: 3s)'
+
+      - alert: HighRequestRate
+        expr: |
+          sum(rate(http_request_duration_seconds_count[5m])) by (service) > 1000
+        for: 2m
+        labels:
+          severity: warning
+          service: '{{ $labels.service }}'
+        annotations:
+          summary: 'High request rate for service {{ $labels.service }}'
+          description: 'Service "{{ $labels.service }}" is receiving {{ printf "%.0f" $value }} requests/sec'
+
+      - alert: RequestRateSpike
+        expr: |
+          (
+            sum(rate(http_request_duration_seconds_count[2m])) by (service) 
+            / 
+            sum(rate(http_request_duration_seconds_count[10m])) by (service)
+          ) > 2
+        for: 2m
+        labels:
+          severity: warning
+          service: '{{ $labels.service }}'
+        annotations:
+          summary: 'Request rate spike detected for service {{ $labels.service }}'
+          description: 'Service "{{ $labels.service }}" request rate has increased by {{ printf "%.1f" $value }}x'
+
+  - name: database-performance
+    interval: 30s
+    rules:
+      - alert: HighDatabaseErrorRate
+        expr: |
+          sum(rate(db_query_errors_total[5m])) by (service) 
+          / 
+          sum(rate(db_queries_total[5m])) by (service) 
+          > 0.01
+        for: 5m
+        labels:
+          severity: critical
+          service: '{{ $labels.service }}'
+        annotations:
+          summary: 'High database error rate for service {{ $labels.service }}'
+          description: 'Service "{{ $labels.service }}" has database error rate of {{ $value }} (threshold: 0.01 = 1%)'
+
+      - alert: SlowDatabaseQueries
+        expr: |
+          histogram_quantile(0.95, 
+            sum(rate(db_query_duration_seconds_bucket[5m])) by (service, le)
+          ) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+          service: '{{ $labels.service }}'
+        annotations:
+          summary: 'Slow database queries for service {{ $labels.service }}'
+          description: 'Service "{{ $labels.service }}" has p95 database query duration of {{ printf "%.2f" $value }}s (threshold: 0.5s)'
+
+      - alert: VerySlowDatabaseQueries
+        expr: |
+          histogram_quantile(0.99, 
+            sum(rate(db_query_duration_seconds_bucket[5m])) by (service, le)
+          ) > 1
+        for: 5m
+        labels:
+          severity: critical
+          service: '{{ $labels.service }}'
+        annotations:
+          summary: 'Very slow database queries for service {{ $labels.service }}'
+          description: 'Service "{{ $labels.service }}" has p99 database query duration of {{ printf "%.2f" $value }}s (threshold: 1s)'
+
+      - alert: HighDatabaseQueriesInFlight
+        expr: |
+          max(db_queries_in_flight) by (service) > 50
+        for: 2m
+        labels:
+          severity: warning
+          service: '{{ $labels.service }}'
+        annotations:
+          summary: 'High number of in-flight database queries for service {{ $labels.service }}'
+          description: 'Service "{{ $labels.service }}" has {{ printf "%.0f" $value }} in-flight database queries (threshold: 50)'
+
+      - alert: DatabaseQuerySaturation
+        expr: |
+          max(db_queries_in_flight) by (service) > 100
+        for: 5m
+        labels:
+          severity: critical
+          service: '{{ $labels.service }}'
+        annotations:
+          summary: 'Database query saturation for service {{ $labels.service }}'
+          description: 'Service "{{ $labels.service }}" has {{ printf "%.0f" $value }} in-flight database queries (threshold: 100). Database may be overwhelmed.'
+
+  - name: resource-usage
+    interval: 30s
+    rules:
+      - alert: HighMemoryUsage
+        expr: |
+          (process_resident_memory_bytes{service!=""} 
+          / 
+          on(instance) node_memory_MemTotal_bytes) > 0.8
+        for: 5m
+        labels:
+          severity: warning
+          service: '{{ $labels.service }}'
+        annotations:
+          summary: 'High memory usage for service {{ $labels.service }}'
+          description: 'Service "{{ $labels.service }}" is using {{ $value }} of available memory (threshold: 0.8 = 80%)'
+
+      - alert: CriticalMemoryUsage
+        expr: |
+          (process_resident_memory_bytes{service!=""} 
+          / 
+          on(instance) node_memory_MemTotal_bytes) > 0.9
+        for: 5m
+        labels:
+          severity: critical
+          service: '{{ $labels.service }}'
+        annotations:
+          summary: 'Critical memory usage for service {{ $labels.service }}'
+          description: 'Service "{{ $labels.service }}" is using {{ $value }} of available memory (threshold: 0.9 = 90%). Service may crash soon.'
+
+      - alert: HighCPUUsage
+        expr: |
+          rate(process_cpu_user_seconds_total{service!=""}[5m]) 
+          + 
+          rate(process_cpu_system_seconds_total{service!=""}[5m]) 
+          > 0.8
+        for: 5m
+        labels:
+          severity: warning
+          service: '{{ $labels.service }}'
+        annotations:
+          summary: 'High CPU usage for service {{ $labels.service }}'
+          description: 'Service "{{ $labels.service }}" is using {{ $value }} CPU (threshold: 0.8 = 80%)'
+
+      - alert: CriticalCPUUsage
+        expr: |
+          rate(process_cpu_user_seconds_total{service!=""}[5m]) 
+          + 
+          rate(process_cpu_system_seconds_total{service!=""}[5m]) 
+          > 0.95
+        for: 5m
+        labels:
+          severity: critical
+          service: '{{ $labels.service }}'
+        annotations:
+          summary: 'Critical CPU usage for service {{ $labels.service }}'
+          description: 'Service "{{ $labels.service }}" is using {{ $value }} CPU (threshold: 0.95 = 95%). Performance degradation likely.'
+
+      - alert: HighHeapMemoryUsage
+        expr: |
+          (nodejs_heap_size_used_bytes{service!=""} 
+          / 
+          nodejs_heap_size_total_bytes{service!=""}) > 0.85
+        for: 5m
+        labels:
+          severity: warning
+          service: '{{ $labels.service }}'
+        annotations:
+          summary: 'High heap memory usage for service {{ $labels.service }}'
+          description: 'Service "{{ $labels.service }}" heap is {{ $value }} full (threshold: 0.85 = 85%). GC pressure may increase.'
+
+  - name: external-dependencies
+    interval: 30s
+    rules:
+      - alert: ExternalDependencyError
+        expr: |
+          sum(rate(external_request_errors_total[5m])) by (service, dependency) 
+          / 
+          sum(rate(external_request_duration_seconds_count[5m])) by (service, dependency) 
+          > 0.05
+        for: 5m
+        labels:
+          severity: critical
+          service: '{{ $labels.service }}'
+          dependency: '{{ $labels.dependency }}'
+        annotations:
+          summary: 'External dependency error for service {{ $labels.service }}'
+          description: 'Service "{{ $labels.service }}" has {{ $value }} error rate calling dependency "{{ $labels.dependency }}" (threshold: 0.05 = 5%)'
+
+      - alert: SlowExternalDependency
+        expr: |
+          histogram_quantile(0.95, 
+            sum(rate(external_request_duration_seconds_bucket[5m])) by (service, dependency, le)
+          ) > 2
+        for: 5m
+        labels:
+          severity: warning
+          service: '{{ $labels.service }}'
+          dependency: '{{ $labels.dependency }}'
+        annotations:
+          summary: 'Slow external dependency for service {{ $labels.service }}'
+          description: 'Service "{{ $labels.service }}" has p95 latency of {{ printf "%.2f" $value }}s calling dependency "{{ $labels.dependency }}" (threshold: 2s)'
+
+  - name: application-health
+    interval: 30s
+    rules:
+      - alert: HighRequestSize
+        expr: |
+          histogram_quantile(0.95, 
+            sum(rate(http_request_size_bytes_bucket[5m])) by (service, le)
+          ) > 10485760
+        for: 5m
+        labels:
+          severity: warning
+          service: '{{ $labels.service }}'
+        annotations:
+          summary: 'Large request size for service {{ $labels.service }}'
+          description: 'Service "{{ $labels.service }}" is receiving p95 request size of {{ $value }} bytes (threshold: 10485760 = 10MB)'
+
+      - alert: HighResponseSize
+        expr: |
+          histogram_quantile(0.95, 
+            sum(rate(http_response_size_bytes_bucket[5m])) by (service, le)
+          ) > 5242880
+        for: 5m
+        labels:
+          severity: warning
+          service: '{{ $labels.service }}'
+        annotations:
+          summary: 'Large response size for service {{ $labels.service }}'
+          description: 'Service "{{ $labels.service }}" is sending p95 response size of {{ $value }} bytes (threshold: 5242880 = 5MB)'
+
+      - alert: HighRequestsInFlight
+        expr: |
+          max(http_requests_in_flight) by (service) > 100
+        for: 2m
+        labels:
+          severity: warning
+          service: '{{ $labels.service }}'
+        annotations:
+          summary: 'High number of in-flight HTTP requests for service {{ $labels.service }}'
+          description: 'Service "{{ $labels.service }}" has {{ printf "%.0f" $value }} in-flight HTTP requests (threshold: 100)'
+
+      - alert: RequestBacklog
+        expr: |
+          max(http_requests_in_flight) by (service) > 200
+        for: 5m
+        labels:
+          severity: critical
+          service: '{{ $labels.service }}'
+        annotations:
+          summary: 'Request backlog for service {{ $labels.service }}'
+          description: 'Service "{{ $labels.service }}" has {{ printf "%.0f" $value }} in-flight HTTP requests (threshold: 200). Service may be overwhelmed.'

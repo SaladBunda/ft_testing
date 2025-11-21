@@ -1,0 +1,257 @@
+const GameManager = require('./GameManager');
+const UserAuth = require('./UserAuth');
+
+class WebSocketHandler {
+  constructor(fastify) {
+    this.fastify = fastify;
+    this.gameManager = new GameManager();
+    this.userAuth = new UserAuth();
+    
+    // Start global game update loop
+    this.startGameUpdateLoop();
+  }
+
+  // Start the global game update loop for all games
+  startGameUpdateLoop() {
+    setInterval(() => {
+      this.gameManager.updateAllGames();
+    }, 16);
+  }
+
+  // Setup WebSocket route
+  setupWebSocket() {
+    this.fastify.register(async (fastify) => {
+      fastify.get("/ws", { websocket: true }, async (connection, req) => {
+        console.log("New client attempting to connect...");
+        
+        // Authenticate the connection
+        const authResult = await this.userAuth.authenticateConnection(req);
+        
+        if (!authResult.success) {
+          console.log(`❌ Authentication failed: ${authResult.error}`);
+          connection.socket.send(JSON.stringify({
+            type: 'authError',
+            error: authResult.error,
+            code: authResult.code
+          }));
+          connection.socket.close();
+          return;
+        }
+
+        const user = authResult.user;
+        console.log(`✅ User authenticated: ${user.username} (ID: ${user.id})`);
+        
+        // Set user online
+        this.userAuth.setUserOnlineStatus(user.id, true);
+        
+        let playerInfo = null;
+
+        // Send authentication success
+        connection.socket.send(JSON.stringify({
+          type: 'authenticated',
+          user: {
+            id: user.id,
+            username: user.username,
+            name: user.name,
+            profilePic: user.profilePic,
+            gameStats: user.gameStats
+          }
+        }));
+
+        // Handle incoming messages
+        connection.socket.on("message", async (message) => {
+          const data = JSON.parse(message.toString());
+          if (data.type !== 'update') { // Only log non-movement messages
+            console.log(`Received message from ${user.username} (${user.id}):`, data);
+          } else if (data.player2DY !== 0 && data.player2DY !== undefined) {
+            // Debug Player 2 movement messages
+            console.log(`🎮 Received Player 2 movement from ${user.username}: p2DY=${data.player2DY}`);
+          }
+          
+          if (data.type === "join") {
+            // Player wants to join a game - now with authentication!
+            const gameMode = data.gameMode || 'matchmaking'; // 'matchmaking' or 'solo'
+            
+            if (gameMode === 'matchmaking') {
+              // Pass authenticated user info to game manager
+              const result = this.gameManager.addAuthenticatedPlayer(
+                connection.socket, 
+                user, 
+                'matchmaking'
+              );
+              
+              if (result.player1 && result.player2) {
+                // Matched two authenticated players
+                const player1 = result.player1;
+                const player2 = result.player2;
+                
+                // Determine which player is the current connection
+                if (player1.connection === connection.socket) {
+                  playerInfo = player1;
+                } else {
+                  playerInfo = player2;
+                }
+                
+                // Send game info to player 1
+                player1.connection.send(JSON.stringify({
+                  type: 'gameJoined',
+                  playerRole: player1.role,
+                  roomId: player1.roomId,
+                  opponent: {
+                    id: player2.user.id,
+                    username: player2.user.username,
+                    name: player2.user.name,
+                    level: player2.user.gameStats.level,
+                    rankTier: player2.user.gameStats.rankTier
+                  }
+                }));
+                
+                // Send game info to player 2
+                player2.connection.send(JSON.stringify({
+                  type: 'gameJoined',
+                  playerRole: player2.role,
+                  roomId: player2.roomId,
+                  opponent: {
+                    id: player1.user.id,
+                    username: player1.user.username,
+                    name: player1.user.name,
+                    level: player1.user.gameStats.level,
+                    rankTier: player1.user.gameStats.rankTier
+                  }
+                }));
+                
+                console.log(`🎮 Matched players: ${player1.user.username} vs ${player2.user.username}`);
+              } else {
+                // Added to waiting queue
+                playerInfo = result;
+                
+                connection.socket.send(JSON.stringify({
+                  type: 'waitingForOpponent',
+                  playerRole: result.role,
+                  roomId: result.roomId,
+                  user: user
+                }));
+                
+                console.log(`⏳ ${user.username} added to matchmaking queue`);
+              }
+            } else if (gameMode === 'solo' || gameMode === 'ai') {
+              // Create solo/AI game for authenticated user
+              const aiDifficulty = data.aiDifficulty || 'medium';
+              const result = this.gameManager.addAuthenticatedPlayer(
+                connection.socket, 
+                user, 
+                gameMode,
+                aiDifficulty
+              );
+              
+              playerInfo = result;
+              
+              connection.socket.send(JSON.stringify({
+                type: 'gameJoined',
+                playerRole: result.role,
+                roomId: result.roomId,
+                gameMode: gameMode,
+                aiDifficulty: gameMode === 'ai' ? aiDifficulty : undefined,
+                user: user
+              }));
+              
+              console.log(`🤖 ${user.username} started ${gameMode} game`);
+            }
+          }
+                const player2 = result.player2;
+                
+                // Set connectionId for the current connection
+                if (player1.connection === connection.socket) {
+                  connectionId = player1.connectionId;
+                  playerInfo = player1;
+                } else {
+                  connectionId = player2.connectionId;
+                  playerInfo = player2;
+                }
+                
+                // Send game info to player 1
+                const player1Connection = this.gameManager.getPlayerInfo(player1.connectionId).connection;
+                player1Connection.send(JSON.stringify({
+                  type: 'gameJoined',
+                  ...player1,
+                  opponent: player2.connectionId
+                }));
+                
+                // Send game info to player 2
+                const player2Connection = this.gameManager.getPlayerInfo(player2.connectionId).connection;
+                player2Connection.send(JSON.stringify({
+                  type: 'gameJoined',
+                  ...player2,
+                  opponent: player1.connectionId
+                }));
+                
+                console.log(`Matched players: ${player1.connectionId} vs ${player2.connectionId}`);
+              } else {
+                // Added to waiting queue
+                connectionId = result.connectionId;
+                playerInfo = result;
+                
+                connection.socket.send(JSON.stringify({
+                  type: 'waiting',
+                  ...result,
+                  message: 'Waiting for another player...'
+                }));
+              }
+            } else if (gameMode === 'solo') {
+              const result = this.gameManager.addPlayer(connection.socket, 'solo');
+              connectionId = result.connectionId;
+              playerInfo = result;
+              
+              connection.socket.send(JSON.stringify({
+                type: 'gameJoined',
+                ...result
+              }));
+            } else if (gameMode === 'ai') {
+              // AI game with difficulty
+              const aiDifficulty = data.aiDifficulty || 'medium';
+              const result = this.gameManager.addPlayer(connection.socket, 'ai', aiDifficulty);
+              connectionId = result.connectionId;
+              playerInfo = result;
+              
+              connection.socket.send(JSON.stringify({
+                type: 'gameJoined',
+                ...result,
+                aiDifficulty
+              }));
+            }
+          } else if (data.type === "update" || data.type === "reset") {
+            // Handle game input
+            if (connectionId) {
+              this.gameManager.handlePlayerInput(connectionId, data);
+            } else {
+              console.log(`❌ Ignoring input from unconnected player: ${data.type}`);
+            }
+          }
+        });
+
+        // Handle client disconnect
+        connection.socket.on("close", () => {
+          console.log("Client disconnected");
+          if (connectionId) {
+            this.gameManager.removePlayer(connectionId);
+          }
+        });
+
+        // Handle errors
+        connection.socket.on("error", (error) => {
+          console.log("WebSocket error:", error);
+          if (connectionId) {
+            this.gameManager.removePlayer(connectionId);
+          }
+        });
+      });
+      
+      // Optional: Add stats endpoint
+      fastify.get("/stats", async (request, reply) => {
+        return this.gameManager.getStats();
+      });
+    });
+  }
+}
+
+module.exports = WebSocketHandler;

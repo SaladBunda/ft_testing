@@ -1,0 +1,15 @@
+/* Reset default margins and prevent scrolling */
+html, body {
+	margin: 0;
+	padding: 0;
+	height: 100%;
+	overflow: hidden; /* prevents page scroll */
+	background: black; /* optional, matches game background */
+	font-family: Arial, sans-serif;
+}
+
+/* Spinner animation for waiting screen */
+@keyframes spin {
+	0% { transform: rotate(0deg); }
+	100% { transform: rotate(360deg); }
+}

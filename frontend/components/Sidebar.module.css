@@ -1,0 +1,93 @@
+.sidebar {
+  width: 280px;
+  background: #0a0a0a;
+  border-right: 1px solid #2a2a2a;
+  display: flex;
+  flex-direction: column;
+  padding: 2rem 1rem;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 2rem;
+  padding: 0 0.5rem;
+}
+
+.logoIcon {
+  width: 40px;
+  height: 40px;
+  background: #1e90ff;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  font-size: 1rem;
+  color: white;
+}
+
+.logoText {
+  display: flex;
+  flex-direction: column;
+}
+
+.logoTitle {
+  font-size: 1.125rem;
+  font-weight: bold;
+  line-height: 1.2;
+}
+
+.logoSubtitle {
+  font-size: 1.125rem;
+  font-weight: bold;
+  line-height: 1.2;
+  color: #cccccc;
+}
+
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  flex: 1;
+}
+
+.navItem {
+  background: none;
+  border: none;
+  color: #cccccc;
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  text-align: left;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.navItem:hover {
+  background: #1a1a1a;
+  color: #ffffff;
+}
+
+.navItem.active {
+  background: #1e90ff;
+  color: #ffffff;
+}
+
+.newGameBtn {
+  background: #1e90ff;
+  border: none;
+  color: white;
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  margin-top: 1rem;
+}
+
+.newGameBtn:hover {
+  background: #1c7ed6;
+}

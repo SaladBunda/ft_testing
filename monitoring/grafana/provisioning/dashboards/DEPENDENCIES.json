@@ -1,0 +1,117 @@
+{
+    "id": null,
+    "uid": null,
+    "title": "DEPENDENCIES - DB & External",
+    "tags": ["dependencies", "db", "external"],
+    "timezone": "browser",
+    "schemaVersion": 37,
+    "version": 1,
+    "templating": {
+      "list": [
+        {
+          "name": "service",
+          "type": "query",
+          "datasource": "Prometheus",
+          "refresh": 1,
+          "query": "label_values(http_request_duration_seconds_count, service)",
+          "sort": 1
+        }
+      ]
+    },
+    "panels": [
+      {
+        "type": "timeseries",
+        "title": "DB latency p50 / p90 / p99 (s)",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.5, sum by (le)(rate(db_query_duration_seconds_bucket{service=\"$service\"}[5m])))",
+            "legendFormat": "p50",
+            "datasource": "Prometheus",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.9, sum by (le)(rate(db_query_duration_seconds_bucket{service=\"$service\"}[5m])))",
+            "legendFormat": "p90",
+            "datasource": "Prometheus",
+            "refId": "B"
+          },
+          {
+            "expr": "histogram_quantile(0.99, sum by (le)(rate(db_query_duration_seconds_bucket{service=\"$service\"}[5m])))",
+            "legendFormat": "p99",
+            "datasource": "Prometheus",
+            "refId": "C"
+          }
+        ],
+        "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+        "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 }
+      },
+      {
+        "type": "timeseries",
+        "title": "DB p99 by operation (top 5)",
+        "targets": [
+          {
+            "expr": "topk(5, histogram_quantile(0.99, sum by (op, le)(rate(db_query_duration_seconds_bucket{service=\"$service\"}[5m]))))",
+            "legendFormat": "{{op}}",
+            "datasource": "Prometheus",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+        "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 }
+      },
+      {
+        "type": "timeseries",
+        "title": "DB error rate (by operation)",
+        "targets": [
+          {
+            "expr": "sum(rate(db_query_errors_total{service=\"$service\"}[$__rate_interval])) by (op)",
+            "legendFormat": "{{op}}",
+            "datasource": "Prometheus",
+            "refId": "A"
+          }
+        ],
+        "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 }
+      },
+      {
+        "type": "timeseries",
+        "title": "External error rate (by dependency)",
+        "targets": [
+          {
+            "expr": "sum(rate(external_request_errors_total{service=\"$service\"}[$__rate_interval])) by (dependency)",
+            "legendFormat": "{{dependency}}",
+            "datasource": "Prometheus",
+            "refId": "A"
+          }
+        ],
+        "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 }
+      },
+      {
+        "type": "timeseries",
+        "title": "External latency p95 by dependency (s)",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, sum by (dependency, le)(rate(external_request_duration_seconds_bucket{service=\"$service\"}[5m])))",
+            "legendFormat": "{{dependency}}",
+            "datasource": "Prometheus",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+        "gridPos": { "x": 0, "y": 16, "w": 12, "h": 8 }
+      },
+      {
+        "type": "timeseries",
+        "title": "DB pool utilization (%)",
+        "targets": [
+          {
+            "expr": "100 * ((sum(db_pool_connections_in_use{service=\"$service\"}) or on() vector(0)) / clamp_min((sum(db_pool_connections_max{service=\"$service\"}) or on() vector(0)), 1))",
+            "legendFormat": "db pool %",
+            "datasource": "Prometheus",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": { "defaults": { "unit": "percent" }, "overrides": [] },
+        "gridPos": { "x": 12, "y": 16, "w": 12, "h": 8 }
+      }
+    ]
+  }

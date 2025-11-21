@@ -1,0 +1,72 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: default-email
+  group_by: ['alertname', 'service']
+  group_wait: 10s
+  group_interval: 1m
+  repeat_interval: 1h
+
+receivers:
+  - name: default-email
+    email_configs:
+      - to: 'dev-alerts@example.test'
+        from: 'alertmanager@example.test'
+        smarthost: 'mailpit:1025'
+        require_tls: false
+        send_resolved: true
+        headers:
+          Subject: '{{ if .CommonLabels.service }}[{{ .CommonLabels.service }}] {{ end }}{{ .GroupLabels.alertname }}'
+        html: |
+          <h2>{{ .CommonAnnotations.summary }}</h2>
+          <p>{{ .CommonAnnotations.description }}</p>
+          <hr>
+          <h3>Alert Details</h3>
+          <ul>
+            {{ if .CommonLabels.service }}
+            <li><strong>Service:</strong> {{ .CommonLabels.service }}</li>
+            {{ else if .Alerts }}
+              {{ range .Alerts }}
+                {{ if .Labels.service }}
+                <li><strong>Service:</strong> {{ .Labels.service }}</li>
+                {{ end }}
+              {{ end }}
+            {{ end }}
+            {{ if .CommonLabels.severity }}
+            <li><strong>Severity:</strong> {{ .CommonLabels.severity }}</li>
+            {{ else if .Alerts }}
+              {{ range .Alerts }}
+                {{ if .Labels.severity }}
+                <li><strong>Severity:</strong> {{ .Labels.severity }}</li>
+                {{ end }}
+              {{ end }}
+            {{ end }}
+            {{ if .CommonLabels.dependency }}
+            <li><strong>Dependency:</strong> {{ .CommonLabels.dependency }}</li>
+            {{ else if .Alerts }}
+              {{ range .Alerts }}
+                {{ if .Labels.dependency }}
+                <li><strong>Dependency:</strong> {{ .Labels.dependency }}</li>
+                {{ end }}
+              {{ end }}
+            {{ end }}
+            <li><strong>Alert Name:</strong> {{ .GroupLabels.alertname }}</li>
+            <li><strong>Firing Alerts:</strong> {{ len .Alerts }}</li>
+          </ul>
+          {{ if .Alerts }}
+          <h3>Individual Alerts</h3>
+          <ul>
+            {{ range .Alerts }}
+            <li>
+              <strong>{{ .Labels.alertname }}</strong>
+              {{ if .Labels.service }} - Service: {{ .Labels.service }}{{ end }}
+              {{ if .Labels.severity }} - Severity: {{ .Labels.severity }}{{ end }}
+              <br>
+              <em>{{ .Annotations.summary }}</em>
+              <br>
+              {{ .Annotations.description }}
+            </li>
+            {{ end }}
+          </ul>
+          {{ end }}

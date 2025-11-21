@@ -1,0 +1,26 @@
+{
+  "type": "module",
+  "name": "chat",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "dev": "nodemon src/server.js",
+    "start": "node src/server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@fastify/cors": "^11.1.0",
+    "@fastify/websocket": "^11.2.0",
+    "better-sqlite3": "^12.4.1",
+    "fastify": "^5.6.1",
+    "pg": "^8.16.3",
+    "prom-client": "15.1.0",
+    "ip-range-check": "0.2.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.9"
+  }
+}
