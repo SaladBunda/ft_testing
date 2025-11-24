@@ -42,7 +42,13 @@ class GameLoop {
     
     // Handle AI movement for Player 2 if in AI mode
     if (this.gameState.gameMode === 'ai' && this.gameState.ai) {
-      state.player2.dy = this.gameState.ai.getMovement(state);
+      const aiMovement = this.gameState.ai.getMovement(state);
+      state.player2.dy = aiMovement;
+      
+      // Debug AI calls for impossible difficulty
+      if (this.gameState.aiDifficulty === 'impossible' && Math.random() < 0.01) { // Log 1% of calls to avoid spam
+        console.log(`🎮 GameLoop: AI getMovement called, returned ${aiMovement}, gameActive=${state.gameActive}`);
+      }
     }
     
     // Paddle movement

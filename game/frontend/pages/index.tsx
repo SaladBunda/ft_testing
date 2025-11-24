@@ -14,6 +14,7 @@ export default function Home() {
   const [showTokenInput, setShowTokenInput] = useState(false);
   const [manualToken, setManualToken] = useState('');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [winScreenData, setWinScreenData] = useState<any>(null);
 
   // This old function has been replaced by connectWebSocketWithMode
 
@@ -421,6 +422,14 @@ export default function Home() {
         setScreen("start");
         setPlayerInfo(null);
         setGameState(null);
+      } else if (message.type === 'gameResult') {
+        // Win screen data received
+        console.log("🎉 Game result received:", message);
+        setWinScreenData({
+          playerData: message.data,
+          matchData: message.matchData
+        });
+        setScreen("end");
       } else if (message.type) {
         // Handle any other message types with debugging
         console.log("🤔 Unknown message type:", message.type, message);
@@ -527,6 +536,244 @@ export default function Home() {
       }
     };
   }, []);
+
+  // Win Screen Component
+  const renderWinScreen = () => {
+    if (!winScreenData) {
+      // Fallback for AI games or when no win screen data available
+      return (
+        <div style={{
+          padding: "30px",
+          backgroundColor: "#1a1a1a",
+          borderRadius: "15px",
+          border: "2px solid #333",
+          maxWidth: "600px",
+          margin: "0 auto",
+          textAlign: "center"
+        }}>
+          <h1 style={{
+            fontSize: "48px",
+            color: gameState?.winner === 'Player 1' ? "#28a745" : "#dc3545",
+            textShadow: "0 0 20px",
+            marginBottom: "20px",
+            fontWeight: "bold"
+          }}>
+            🎉 {gameState?.winner} Wins! 🎉
+          </h1>
+          
+          <p style={{ fontSize: "24px", marginBottom: "30px" }}>
+            Final Score: {gameState?.player1?.score || 0} - {gameState?.player2?.score || 0}
+          </p>
+          
+          {/* Action Buttons */}
+          <div style={{ display: "flex", gap: "15px", justifyContent: "center" }}>
+            <button
+              onClick={handleRestart}
+              style={{
+                padding: "12px 25px",
+                fontSize: "16px",
+                backgroundColor: "#28a745",
+                color: "white",
+                border: "none",
+                borderRadius: "8px",
+                cursor: "pointer",
+                fontWeight: "bold"
+              }}
+            >
+              🎮 Play Again
+            </button>
+            <button
+              onClick={() => {
+                setScreen("start");
+                setPlayerInfo(null);
+                setGameState(null);
+                setWinScreenData(null);
+                if (wsRef.current) {
+                  wsRef.current.close();
+                  wsRef.current = null;
+                }
+              }}
+              style={{
+                padding: "12px 25px",
+                fontSize: "16px",
+                backgroundColor: "#6c757d",
+                color: "white",
+                border: "none",
+                borderRadius: "8px",
+                cursor: "pointer",
+                fontWeight: "bold"
+              }}
+            >
+              🏠 Main Menu
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    const { playerData, matchData } = winScreenData;
+    
+    return (
+      <div style={{
+        padding: "30px",
+        backgroundColor: "#1a1a1a",
+        borderRadius: "15px",
+        border: "2px solid #333",
+        maxWidth: "600px",
+        margin: "0 auto"
+      }}>
+        {/* Victory/Defeat Title */}
+        <h1 style={{
+          fontSize: "48px",
+          color: playerData.result === 'victory' ? "#28a745" : "#dc3545",
+          textShadow: "0 0 20px",
+          marginBottom: "20px",
+          textTransform: "uppercase",
+          fontWeight: "bold"
+        }}>
+          🎉 {playerData.result?.toUpperCase() || 'GAME OVER'} 🎉
+        </h1>
+
+        {/* Match Summary */}
+        <div style={{ 
+          backgroundColor: "#2a2a2a", 
+          padding: "20px", 
+          borderRadius: "10px", 
+          marginBottom: "25px" 
+        }}>
+          <h3 style={{ color: "#ffd700", marginBottom: "15px" }}>Match Summary</h3>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "10px" }}>
+            <span><strong>Duration:</strong> {matchData.duration}</span>
+            <span><strong>Winner:</strong> {matchData.winnerName}</span>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between" }}>
+            <span><strong>Final Score:</strong> {matchData.player1Score} - {matchData.player2Score}</span>
+            <span><strong>Total Volleys:</strong> {matchData.totalVolleys}</span>
+          </div>
+        </div>
+
+        {/* Player Performance */}
+        <div style={{ 
+          backgroundColor: "#2a2a2a", 
+          padding: "20px", 
+          borderRadius: "10px", 
+          marginBottom: "25px" 
+        }}>
+          <h3 style={{ color: "#17a2b8", marginBottom: "15px" }}>Your Performance</h3>
+          
+          {/* XP Progress */}
+          <div style={{ marginBottom: "20px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span><strong>Experience Points:</strong></span>
+              <span style={{ color: playerData.rewards?.experience >= 0 ? "#28a745" : "#dc3545", fontSize: "18px" }}>
+                {playerData.rewards?.experience >= 0 ? "+" : ""}{playerData.rewards?.experience || 0} XP
+              </span>
+            </div>
+            <div style={{ 
+              backgroundColor: "#444", 
+              height: "20px", 
+              borderRadius: "10px", 
+              marginTop: "5px",
+              overflow: "hidden"
+            }}>
+              <div style={{
+                backgroundColor: "#17a2b8",
+                height: "100%",
+                width: `${Math.min(100, (playerData.progression?.after?.experience / 1000) * 100)}%`,
+                borderRadius: "10px",
+                transition: "width 0.5s ease"
+              }}></div>
+            </div>
+            <div style={{ fontSize: "14px", color: "#ccc", marginTop: "5px" }}>
+              {playerData.progression?.before?.experience || 0} → {playerData.progression?.after?.experience || 0} XP
+            </div>
+          </div>
+
+          {/* Rank Progress */}
+          <div style={{ marginBottom: "20px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span><strong>Rank Points:</strong></span>
+              <span style={{ color: playerData.rewards?.rankPoints >= 0 ? "#28a745" : "#dc3545", fontSize: "18px" }}>
+                {playerData.rewards?.rankPointsChange || 0} RP
+              </span>
+            </div>
+            <div style={{ fontSize: "16px", marginTop: "10px" }}>
+              <span style={{ color: "#ffd700" }}>
+                {playerData.progression?.before?.rank || "Unknown"}
+              </span>
+              {playerData.progression?.before?.rank !== playerData.progression?.after?.rank && (
+                <span style={{ color: "#28a745", margin: "0 10px" }}>
+                  → {playerData.progression?.after?.rank || "Unknown"} 🎉
+                </span>
+              )}
+            </div>
+            <div style={{ fontSize: "14px", color: "#ccc", marginTop: "5px" }}>
+              {playerData.progression?.before?.rankPoints || 0} → {playerData.progression?.after?.rankPoints || 0} RP
+            </div>
+          </div>
+
+          {/* Game Stats */}
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "5px" }}>
+              <span>Games Played:</span>
+              <span>{playerData.progression?.after?.gamesPlayed || 0} (+1)</span>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "5px" }}>
+              <span>Games Won:</span>
+              <span>{playerData.progression?.after?.gamesWon || 0} ({playerData.result === 'victory' ? '+1' : '+0'})</span>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between" }}>
+              <span>Win Rate:</span>
+              <span>{playerData.progression?.after?.winRate?.toFixed(1) || '0.0'}%</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Action Buttons */}
+        <div style={{ display: "flex", gap: "15px", justifyContent: "center" }}>
+          <button
+            onClick={handleRestart}
+            style={{
+              padding: "12px 25px",
+              fontSize: "16px",
+              backgroundColor: "#28a745",
+              color: "white",
+              border: "none",
+              borderRadius: "8px",
+              cursor: "pointer",
+              fontWeight: "bold"
+            }}
+          >
+            🎮 Play Again
+          </button>
+          <button
+            onClick={() => {
+              setScreen("start");
+              setPlayerInfo(null);
+              setGameState(null);
+              setWinScreenData(null);
+              if (wsRef.current) {
+                wsRef.current.close();
+                wsRef.current = null;
+              }
+            }}
+            style={{
+              padding: "12px 25px",
+              fontSize: "16px",
+              backgroundColor: "#6c757d",
+              color: "white",
+              border: "none",
+              borderRadius: "8px",
+              cursor: "pointer",
+              fontWeight: "bold"
+            }}
+          >
+            🏠 Main Menu
+          </button>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div style={{ 
@@ -1004,49 +1251,7 @@ export default function Home() {
         </div>
       )}
 
-      {screen === "end" && (
-        <div>
-          <h1>{gameState?.winner} Wins!</h1>
-          <p>Final Score: {gameState?.player1?.score || 0} - {gameState?.player2?.score || 0}</p>
-          <button
-            onClick={handleRestart}
-            style={{
-              padding: "10px 20px",
-              fontSize: "18px",
-              backgroundColor: "#28a745",
-              color: "white",
-              border: "none",
-              borderRadius: "5px",
-              cursor: "pointer",
-              marginRight: "10px"
-            }}
-          >
-            Play Again
-          </button>
-          <button
-            onClick={() => {
-              setScreen("start");
-              setPlayerInfo(null);
-              setGameState(null);
-              if (wsRef.current) {
-                wsRef.current.close();
-                wsRef.current = null;
-              }
-            }}
-            style={{
-              padding: "10px 20px",
-              fontSize: "18px",
-              backgroundColor: "#dc3545",
-              color: "white",
-              border: "none",
-              borderRadius: "5px",
-              cursor: "pointer"
-            }}
-          >
-            Main Menu
-          </button>
-        </div>
-      )}
+      {screen === "end" && renderWinScreen()}
     </div>
   );
 }

@@ -1,6 +1,7 @@
 const GameState = require('./GameState');
 const GameLoop = require('./GameLoop');
 const GameStatsHandler = require('./GameStatsHandler');
+const WinScreenData = require('./WinScreenData');
 
 
 
@@ -36,6 +37,7 @@ class GameManager {
     // Initialize stats handler
     this.userAuth = userAuth;
     this.statsHandler = new GameStatsHandler(userAuth);
+    this.winScreenData = new WinScreenData(this.statsHandler, this.statsHandler.progression);
   }
 
   // Generate unique connection ID
@@ -306,7 +308,10 @@ class GameManager {
 
   // Create an authenticated multiplayer game between two users
   createMultiplayerGameAuth(player1Data, player2Data) {
-    console.log(`🎮 createMultiplayerGameAuth called: ${player1Data.user.username} vs ${player2Data.user.username}`);
+    console.log(`🎮 createMultiplayerGameAuth called:`);
+    console.log(`  👤 Player1 (first to join): ${player1Data.user.username} (ID: ${player1Data.user.id}) → role: player1`);
+    console.log(`  👤 Player2 (second to join): ${player2Data.user.username} (ID: ${player2Data.user.id}) → role: player2`);
+    
     const roomId = this.generateRoomId();
     const gameState = new GameState();
     const gameLoop = new GameLoop(gameState);
@@ -684,6 +689,14 @@ class GameManager {
       const gameDuration = gameRoom.gameStartTime 
         ? Math.floor((gameRoom.gameEndTime - gameRoom.gameStartTime) / 1000)
         : 0;
+      
+      console.log(`🔍 Duration debug:`, {
+        gameStartTime: gameRoom.gameStartTime,
+        gameEndTime: gameRoom.gameEndTime,
+        rawDuration: gameRoom.gameEndTime - gameRoom.gameStartTime,
+        calculatedDuration: gameDuration
+      });
+      
       const totalScore = gameState.player1.score + gameState.player2.score;
       
       console.log(`📊 Game ${roomId} stats: duration=${gameDuration}s, total_score=${totalScore}, winner=${gameState.winner}`);
@@ -721,6 +734,7 @@ class GameManager {
 
       // Create game result object - Map players correctly, handling disconnections
       let actualPlayer1Info, actualPlayer2Info;
+      let actualPlayer1Score, actualPlayer2Score;
       
       // Handle cases where one or both players might have disconnected
       if (player1Info && player2Info) {
@@ -728,23 +742,34 @@ class GameManager {
         if (player1Info.role === 'player1' && player2Info.role === 'player2') {
           actualPlayer1Info = player1Info;
           actualPlayer2Info = player2Info;
+          actualPlayer1Score = gameState.player1.score;
+          actualPlayer2Score = gameState.player2.score;
         } else if (player1Info.role === 'player2' && player2Info.role === 'player1') {
-          actualPlayer1Info = player2Info;
-          actualPlayer2Info = player1Info;
+          // FIXED: Swap both players AND their scores
+          actualPlayer1Info = player2Info;  // player2Info has role 'player1'
+          actualPlayer2Info = player1Info;  // player1Info has role 'player2'
+          actualPlayer1Score = gameState.player1.score;  // player1 score goes to actual player1
+          actualPlayer2Score = gameState.player2.score;  // player2 score goes to actual player2
         } else {
           // Fallback mapping
           const playerList = [player1Info, player2Info];
           actualPlayer1Info = playerList.find(p => p.role === 'player1') || player1Info;
           actualPlayer2Info = playerList.find(p => p.role === 'player2') || player2Info;
+          actualPlayer1Score = gameState.player1.score;
+          actualPlayer2Score = gameState.player2.score;
         }
       } else if (player1Info && !player2Info) {
         // Only player1 present
         actualPlayer1Info = player1Info.role === 'player1' ? player1Info : null;
         actualPlayer2Info = player1Info.role === 'player2' ? player1Info : null;
+        actualPlayer1Score = gameState.player1.score;
+        actualPlayer2Score = gameState.player2.score;
       } else if (!player1Info && player2Info) {
         // Only player2 present  
         actualPlayer1Info = player2Info.role === 'player1' ? player2Info : null;
         actualPlayer2Info = player2Info.role === 'player2' ? player2Info : null;
+        actualPlayer1Score = gameState.player1.score;
+        actualPlayer2Score = gameState.player2.score;
       } else {
         console.log(`❌ No valid players for ${roomId}`);
         return;
@@ -760,11 +785,12 @@ class GameManager {
       const gameResult = {
         player1Id: actualPlayer1Info?.user?.id || null,
         player2Id: actualPlayer2Info?.user?.id || null,
-        player1Score: gameState.player1.score,
-        player2Score: gameState.player2.score,
+        player1Score: actualPlayer1Score,
+        player2Score: actualPlayer2Score,
         gameMode: gameMode,
         aiDifficulty: gameRoom.gameState.aiDifficulty,
-        gameDuration: gameDuration
+        gameDuration: gameDuration,
+        totalVolleys: gameState.totalVolleys || 0  // Add volleys count
       };
 
       console.log(`🎯 CRITICAL DEBUG - Game completion data:`, {
@@ -804,7 +830,31 @@ class GameManager {
       // Process stats for any authenticated players (including disconnected scenarios)
       if (gameResult.player1Id || gameResult.player2Id) {
         console.log(`🏆 Processing stats for game result:`, gameResult);
+        
+        // Generate win screen data BEFORE applying stats (to show before/after comparison)
+        const winScreenData = await this.winScreenData.generateWinScreenData(
+          gameResult, 
+          actualPlayer1Info, 
+          actualPlayer2Info
+        );
+        
+        console.log(`🎯 Win screen mapping:`, {
+          player1Info: actualPlayer1Info?.user?.username || 'null',
+          player2Info: actualPlayer2Info?.user?.username || 'null',
+          player1Score: gameResult.player1Score,
+          player2Score: gameResult.player2Score,
+          player1Won: gameResult.player1Score > gameResult.player2Score,
+          player2Won: gameResult.player2Score > gameResult.player1Score,
+          winScreenPlayer1Result: winScreenData?.player1?.result,
+          winScreenPlayer2Result: winScreenData?.player2?.result
+        });
+        
         await this.statsHandler.processGameCompletion(gameResult);
+        
+        // Send win screen data to connected players
+        if (winScreenData) {
+          this.sendWinScreenData(actualPlayer1Info, actualPlayer2Info, winScreenData);
+        }
         
         // Send updated stats to connected players
         await this.sendUpdatedStats(actualPlayer1Info, actualPlayer2Info, gameMode);
@@ -814,6 +864,31 @@ class GameManager {
 
     } catch (error) {
       console.error(`❌ Error processing game completion for ${roomId}:`, error);
+    }
+  }
+
+  // Send win screen data to connected players
+  sendWinScreenData(player1Info, player2Info, winScreenData) {
+    try {
+      if (player1Info?.connection && winScreenData.player1) {
+        player1Info.connection.send(JSON.stringify({
+          type: 'gameResult',
+          data: winScreenData.player1,
+          matchData: winScreenData.matchData
+        }));
+        console.log(`🎉 Sent win screen data to ${winScreenData.player1.username}: ${winScreenData.player1.result}`);
+      }
+
+      if (player2Info?.connection && winScreenData.player2) {
+        player2Info.connection.send(JSON.stringify({
+          type: 'gameResult',
+          data: winScreenData.player2,
+          matchData: winScreenData.matchData
+        }));
+        console.log(`🎉 Sent win screen data to ${winScreenData.player2.username}: ${winScreenData.player2.result}`);
+      }
+    } catch (error) {
+      console.error('❌ Error sending win screen data:', error);
     }
   }
 

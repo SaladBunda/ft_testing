@@ -14,6 +14,7 @@ class GameState {
       winner: null,
       countdown: 0,
       gameActive: false,
+      totalVolleys: 0,  // Track ball exchanges between paddles
     };
     
     this.baseSpeed = 1.5;
@@ -25,9 +26,13 @@ class GameState {
     
     // Initialize AI if needed
     if (gameMode === 'ai' && aiDifficulty) {
-      const AIPlayer = require('./AIPlayer');
-      this.ai = new AIPlayer(aiDifficulty);
-      console.log(`🤖 AI initialized with difficulty: ${aiDifficulty}`);
+      const { AIFactory, AI_CONFIG } = require('./AIFactory');
+      
+      // You can change AI_CONFIG.defaultType in AIFactory.js to switch between:
+      // 'original' - smooth, responsive AI (current working version)
+      // 'subject-compliant' - follows subject requirements (1s refresh, keyboard simulation)
+      this.ai = AIFactory.createAI(AI_CONFIG.defaultType, aiDifficulty);
+      console.log(`🤖 AI initialized: ${AI_CONFIG.defaultType} AI with difficulty: ${aiDifficulty}`);
     }
   }
 

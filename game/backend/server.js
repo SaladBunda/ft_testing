@@ -22,6 +22,11 @@ fastify.addHook('preHandler', async (request, reply) => {
 
 fastify.register(fastifyWebsocket);
 
+// Add health check endpoint
+fastify.get('/health', async (request, reply) => {
+  return { status: 'healthy', timestamp: new Date().toISOString() };
+});
+
 // Setup WebSocket handling
 const wsHandler = new WebSocketHandler(fastify);
 wsHandler.setupWebSocket();

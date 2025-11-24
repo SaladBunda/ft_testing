@@ -173,6 +173,26 @@ class PlayerProgression {
         
         return colors[tier] || colors['Bronze'];
     }
+
+    /**
+     * Calculate player level based on experience points
+     * @param {number} experiencePoints - Current experience points
+     * @returns {object} Level information
+     */
+    calculateLevel(experiencePoints = 0) {
+        // Simple level calculation: 100 XP per level
+        const level = Math.floor(experiencePoints / 100) + 1;
+        const currentLevelXP = experiencePoints % 100;
+        const nextLevelXP = 100;
+        
+        return {
+            level: level,
+            currentXP: currentLevelXP,
+            nextLevelXP: nextLevelXP,
+            totalXP: experiencePoints,
+            progressPercent: (currentLevelXP / nextLevelXP) * 100
+        };
+    }
 }
 
 module.exports = PlayerProgression;
