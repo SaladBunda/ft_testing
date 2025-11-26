@@ -23,6 +23,15 @@ class GameLoop {
     if (Date.now() - this.gameState.lastSpeedIncrease >= 2000) { // Every 2 seconds instead of 1
       this.gameState.movementSpeed += 0.2; // Smaller increments
       this.gameState.lastSpeedIncrease = Date.now();
+      
+      // Speed cap for AI mode to keep game balanced
+      if (this.gameState.gameMode === 'ai') {
+        const maxSpeed = 2.5; // Cap at 2.5 for AI mode (total = 4.0 max)
+        if (this.gameState.movementSpeed > maxSpeed) {
+          this.gameState.movementSpeed = maxSpeed;
+          console.log(`⚡ AI Mode: Speed capped at ${maxSpeed} (total ball speed: ${this.gameState.movementSpeed + this.gameState.baseSpeed})`);
+        }
+      }
     }
 
     // Ball movement

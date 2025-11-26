@@ -110,7 +110,19 @@ class GameState {
         this.gameState.ball.dy = dy;
         this.gameState.gameActive = true;
         
-        if (loser) this.baseSpeed += 0.2; // Only increase speed on actual scoring, not restart
+        if (loser) {
+          this.baseSpeed += 0.2; // Only increase speed on actual scoring, not restart
+          
+          // Speed cap for AI mode
+          if (this.gameMode === 'ai') {
+            const maxBaseSpeed = 2.0; // Cap baseSpeed at 2.0 for AI mode
+            if (this.baseSpeed > maxBaseSpeed) {
+              this.baseSpeed = maxBaseSpeed;
+              console.log(`⚡ AI Mode: Base speed capped at ${maxBaseSpeed}`);
+            }
+          }
+        }
+        
         this.movementSpeed = 0;
         this.lastSpeedIncrease = Date.now();
         
