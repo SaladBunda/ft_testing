@@ -41,6 +41,10 @@ class WebSocketHandler {
         const user = authResult.user;
         console.log(`✅ User authenticated: ${user.username} (ID: ${user.id})`);
         
+        // Generate unique connection ID
+        connection.id = `conn_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        console.log(`🔗 Connection ID: ${connection.id}`);
+        
         // Set user online
         await this.userAuth.setUserOnlineStatus(user.id, true);
         
@@ -161,26 +165,48 @@ class WebSocketHandler {
               }));
               
               console.log(`🤖 ${user.username} started ${gameMode} game`);
+              
+            } else if (gameMode === 'tournament') {
+              // Add player to tournament queue
+              const result = this.gameManager.addToTournamentQueue(
+                connection.socket,
+                connection.id,
+                user
+              );
+              
+              if (result.queued) {
+                connection.socket.send(JSON.stringify({
+                  type: 'tournamentQueued',
+                  queuePosition: result.queuePosition,
+                  queueSize: result.queueSize,
+                  playerList: result.playerList
+                }));
+                console.log(`🏆 ${user.username} joined tournament queue (${result.queueSize}/8)`);
+              } else if (result.started) {
+                connection.socket.send(JSON.stringify({
+                  type: 'tournamentStarted',
+                  tournamentId: result.tournamentId,
+                  bracket: result.bracket
+                }));
+                console.log(`🎯 Tournament ${result.tournamentId} started with 8 players`);
+              }
             }
             
           } else if (data.type === "update" || data.type === "reset") {
             // Handle game input if player is in a game
-            if (playerInfo && playerInfo.connectionId) {
-              this.gameManager.handlePlayerInput(playerInfo.connectionId, data);
-            }
+            // Use connection.id directly instead of playerInfo.connectionId
+            this.gameManager.handlePlayerInput(connection.id, data);
           } else if (data.type === "cancel") {
             // Handle matchmaking cancellation
             console.log(`🚫 User ${user.username} (${user.id}) cancelled matchmaking`);
-            if (playerInfo && playerInfo.connectionId) {
-              // Remove player from matchmaking queue and any games
-              this.gameManager.removePlayer(playerInfo.connectionId);
-              
-              // Send cancellation confirmation
-              connection.socket.send(JSON.stringify({
-                type: 'matchCancelled',
-                message: 'Matchmaking cancelled successfully'
-              }));
-            }
+            // Remove player from matchmaking queue and any games
+            this.gameManager.removePlayer(connection.id);
+            
+            // Send cancellation confirmation
+            connection.socket.send(JSON.stringify({
+              type: 'matchCancelled',
+              message: 'Matchmaking cancelled successfully'
+            }));
           }
         });
 
@@ -191,10 +217,8 @@ class WebSocketHandler {
           // Set user offline
           await this.userAuth.setUserOnlineStatus(user.id, false);
           
-          // Remove player from game
-          if (playerInfo) {
-            this.gameManager.removePlayer(playerInfo.connectionId);
-          }
+          // Remove player from game using connection.id
+          this.gameManager.removePlayer(connection.id);
         });
       });
     });

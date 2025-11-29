@@ -269,6 +269,80 @@ class GameStatsHandler {
             }
         };
     }
+
+    /**
+     * Apply tournament rewards (RR and XP) without affecting W/L stats
+     * Tournament matches don't count toward games_played/won/lost
+     * @param {number} userId - User ID
+     * @param {object} rewards - Reward object with rating_change and xp_gain
+     * @param {boolean} won - Whether the player won this match
+     */
+    async applyTournamentRewards(userId, rewards, won) {
+        try {
+            console.log(`🏆 Applying tournament rewards to user ${userId}: RR${rewards.rating_change >= 0 ? '+' : ''}${rewards.rating_change}, XP+${rewards.xp_gain}`);
+            
+            // Get current stats
+            const stats = await this.getUserStats(userId);
+            
+            // Calculate new values
+            const newRating = Math.max(0, stats.ranked_rating + rewards.rating_change);
+            const newXp = stats.xp + rewards.xp_gain;
+            
+            // Calculate new level
+            const newLevelInfo = this.progression.calculateLevel(newXp);
+            
+            // Calculate new rank
+            const newRankInfo = this.progression.calculateRank(newRating);
+            
+            // Update database - only RR, XP, and level, NOT game counts
+            await this.userAuth.db.run(
+                `UPDATE users 
+                 SET ranked_rating = ?, 
+                     xp = ?, 
+                     level = ?
+                 WHERE id = ?`,
+                [newRating, newXp, newLevelInfo.level, userId]
+            );
+            
+            console.log(`✅ Tournament rewards applied: User ${userId} now has ${newRating} RR, ${newXp} XP, Level ${newLevelInfo.level}`);
+            
+            return {
+                success: true,
+                newRating,
+                newXp,
+                newLevel: newLevelInfo.level,
+                newRank: newRankInfo.tier
+            };
+            
+        } catch (error) {
+            console.error(`❌ Error applying tournament rewards for user ${userId}:`, error);
+            return { success: false, error: error.message };
+        }
+    }
+
+    /**
+     * Get player stats (simplified version for tournament)
+     * @param {number} userId - User ID
+     * @returns {object} Player stats with ranked_rating, xp, and level
+     */
+    async getPlayerStats(userId) {
+        return new Promise((resolve, reject) => {
+            const db = this.userAuth.getDb();
+            db.get(
+                'SELECT ranked_rating, xp, level FROM users WHERE id = ?',
+                [userId],
+                (err, row) => {
+                    if (err) {
+                        reject(err);
+                    } else if (!row) {
+                        reject(new Error(`User ${userId} not found`));
+                    } else {
+                        resolve(row);
+                    }
+                }
+            );
+        });
+    }
 }
 
 module.exports = GameStatsHandler;

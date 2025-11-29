@@ -2,6 +2,7 @@ const GameState = require('./GameState');
 const GameLoop = require('./GameLoop');
 const GameStatsHandler = require('./GameStatsHandler');
 const WinScreenData = require('./WinScreenData');
+const TournamentManager = require('./TournamentManager');
 
 
 
@@ -38,6 +39,9 @@ class GameManager {
     this.userAuth = userAuth;
     this.statsHandler = new GameStatsHandler(userAuth);
     this.winScreenData = new WinScreenData(this.statsHandler, this.statsHandler.progression);
+    
+    // Initialize tournament manager
+    this.tournamentManager = new TournamentManager();
   }
 
   // Generate unique connection ID
@@ -67,6 +71,9 @@ class GameManager {
     } else if (gameMode === 'ai') {
       // Create an AI game
       return this.createSoloGameAuth(connection, connectionId, user, 'ai', aiDifficulty);
+    } else if (gameMode === 'tournament') {
+      // Add to tournament queue
+      return this.addToTournamentQueue(connection, connectionId, user);
     } else {
       // Add to matchmaking queue
       return this.addToMatchmakingAuth(connection, connectionId, user);
@@ -247,6 +254,205 @@ class GameManager {
         gameType: 'multiplayer',
         gameState: null
       };
+    }
+  }
+
+  // Add authenticated user to tournament queue
+  addToTournamentQueue(connection, connectionId, user) {
+    console.log(`🏆 Adding ${user.username} to tournament queue`);
+    
+    // Add player to tournament manager
+    const result = this.tournamentManager.addPlayerToQueue(connection, user);
+    
+    // Store player data
+    this.players.set(connectionId, {
+      roomId: null,
+      role: 'tournament_waiting',
+      connection,
+      user,
+      tournamentId: result.tournamentId || null
+    });
+    
+    if (result.status === 'tournament_started') {
+      console.log(`🎪 Tournament ${result.tournamentId} starting with 8 players!`);
+      
+      // Notify all players that tournament is starting
+      const tournament = this.tournamentManager.getTournament(result.tournamentId);
+      if (tournament) {
+        // Create first round matches (quarter-finals)
+        this.createTournamentMatches(tournament);
+      }
+      
+      // Clean bracket data - remove connection objects to avoid circular JSON
+      const cleanBracket = {
+        quarterFinals: result.bracket.quarterFinals.map(match => ({
+          match: match.match,
+          player1: { username: match.player1.user.username, id: match.player1.user.id },
+          player2: { username: match.player2.user.username, id: match.player2.user.id },
+          winner: match.winner
+        })),
+        semiFinals: result.bracket.semiFinals.map(match => ({
+          match: match.match,
+          player1: match.player1 ? { username: match.player1.user.username, id: match.player1.user.id } : null,
+          player2: match.player2 ? { username: match.player2.user.username, id: match.player2.user.id } : null,
+          winner: match.winner
+        })),
+        finals: {
+          match: result.bracket.finals.match,
+          player1: result.bracket.finals.player1 ? { username: result.bracket.finals.player1.user.username, id: result.bracket.finals.player1.user.id } : null,
+          player2: result.bracket.finals.player2 ? { username: result.bracket.finals.player2.user.username, id: result.bracket.finals.player2.user.id } : null,
+          winner: result.bracket.finals.winner
+        }
+      };
+      
+      return {
+        started: true,
+        tournamentId: result.tournamentId,
+        bracket: cleanBracket
+      };
+    } else {
+      console.log(`� ${user.username} joined tournament queue (${result.position}/8)`);
+      
+      return {
+        queued: true,
+        queuePosition: result.position,
+        queueSize: result.position,
+        playerList: result.queuedPlayers
+      };
+    }
+  }
+
+  // Create tournament matches for the current round
+  createTournamentMatches(tournament) {
+    console.log(`📋 Creating matches for tournament ${tournament.id}, status: ${tournament.status}`);
+    console.log(`📊 Current players in GameManager: ${this.players.size}`);
+    
+    let matches = [];
+    
+    if (tournament.status === 'quarter_finals') {
+      matches = tournament.bracket.quarterFinals;
+    } else if (tournament.status === 'semi_finals') {
+      matches = tournament.bracket.semiFinals;
+    } else if (tournament.status === 'finals') {
+      matches = [tournament.bracket.finals];
+    }
+    
+    console.log(`🎯 Found ${matches.length} matches to create`);
+    
+    // Create game rooms for each match
+    for (const match of matches) {
+      if (match.player1 && match.player2 && !match.winner) {
+        console.log(`🔨 Creating match ${match.match}: ${match.player1.user.username} vs ${match.player2.user.username}`);
+        this.createTournamentMatch(tournament.id, match);
+      }
+    }
+  }
+
+  // Create a single tournament match
+  createTournamentMatch(tournamentId, match) {
+    const roomId = this.generateRoomId();
+    const gameState = new GameState('tournament');
+    const gameLoop = new GameLoop(gameState);
+    
+    const player1Data = match.player1;
+    const player2Data = match.player2;
+    
+    console.log(`🔍 Looking for connections - P1: ${player1Data.user.username} (ID: ${player1Data.user.id}), P2: ${player2Data.user.username} (ID: ${player2Data.user.id})`);
+    
+    // Find connection IDs for these players
+    let player1ConnectionId = null;
+    let player2ConnectionId = null;
+    
+    for (const [connId, playerInfo] of this.players.entries()) {
+      console.log(`   Checking connection ${connId}: user ${playerInfo.user?.username} (ID: ${playerInfo.user?.id}), role: ${playerInfo.role}`);
+      if (playerInfo.user && playerInfo.user.id === player1Data.user.id) {
+        player1ConnectionId = connId;
+        console.log(`   ✅ Found P1 connection: ${connId}`);
+      }
+      if (playerInfo.user && playerInfo.user.id === player2Data.user.id) {
+        player2ConnectionId = connId;
+        console.log(`   ✅ Found P2 connection: ${connId}`);
+      }
+    }
+    
+    if (!player1ConnectionId || !player2ConnectionId) {
+      console.log(`❌ Could not find connections for tournament match ${match.match} - P1: ${player1ConnectionId}, P2: ${player2ConnectionId}`);
+      return;
+    }
+    
+    const gameRoom = {
+      mode: 'tournament',
+      tournamentId: tournamentId,
+      matchId: match.match,
+      gameState,
+      gameLoop,
+      players: new Set([player1ConnectionId, player2ConnectionId]),
+      spectators: new Set(),
+      authenticatedPlayers: new Map([
+        [player1ConnectionId, player1Data.user],
+        [player2ConnectionId, player2Data.user]
+      ]),
+      gameStartTime: Date.now(),
+      wasActive: false,
+      gameProcessed: false
+    };
+
+    this.games.set(roomId, gameRoom);
+    
+    // Update player data with room assignment
+    this.players.set(player1ConnectionId, {
+      roomId,
+      role: 'player1',
+      connection: player1Data.connection,
+      user: player1Data.user,
+      tournamentId: tournamentId,
+      matchId: match.match
+    });
+    
+    this.players.set(player2ConnectionId, {
+      roomId,
+      role: 'player2',
+      connection: player2Data.connection,
+      user: player2Data.user,
+      tournamentId: tournamentId,
+      matchId: match.match
+    });
+
+    // Initialize game
+    gameState.resetBall();
+
+    console.log(`🏆 Created tournament match ${match.match}: ${player1Data.user.username} vs ${player2Data.user.username} (Room: ${roomId})`);
+    
+    // Send match start messages to both players
+    const matchStartMsg = {
+      type: 'tournamentMatchReady',
+      tournamentId: tournamentId,
+      matchId: match.match,
+      roomId: roomId,
+      round: this.tournamentManager.getTournament(tournamentId).status,
+      gameState: gameState.getState()
+    };
+    
+    if (player1Data.connection) {
+      player1Data.connection.send(JSON.stringify({
+        ...matchStartMsg,
+        playerRole: 'player1',
+        opponent: {
+          id: player2Data.user.id,
+          username: player2Data.user.username
+        }
+      }));
+    }
+    
+    if (player2Data.connection) {
+      player2Data.connection.send(JSON.stringify({
+        ...matchStartMsg,
+        playerRole: 'player2',
+        opponent: {
+          id: player1Data.user.id,
+          username: player1Data.user.username
+        }
+      }));
     }
   }
 
@@ -646,8 +852,63 @@ class GameManager {
             }
           }
         } else {
-          console.log(`Player ${connectionId} left room ${player.roomId}, ${gameRoom.players.size} players remaining`);
-          // Game had meaningful progress, normal disconnection handling continues
+          // Game had meaningful progress - award win to remaining player
+          console.log(`⚡ Player disconnected mid-game in ${player.roomId} - awarding win to remaining player`);
+          
+          const remainingPlayers = Array.from(gameRoom.players);
+          if (remainingPlayers.length === 1) {
+            const winnerId = remainingPlayers[0];
+            const winnerData = this.players.get(winnerId);
+            const disconnectedData = player;
+            
+            if (winnerData) {
+              // Determine which player role disconnected
+              const winnerRole = winnerData.role;
+              const loserRole = disconnectedData.role;
+              
+              // Set final scores - winner gets 5, disconnected player keeps current score
+              const currentState = gameRoom.gameState.getState();
+              const winnerScore = 5; // Max score
+              const loserScore = winnerRole === 'player1' ? currentState.player2.score : currentState.player1.score;
+              
+              // Update game state to reflect the win
+              gameRoom.finalScores = {
+                player1Score: winnerRole === 'player1' ? winnerScore : loserScore,
+                player2Score: winnerRole === 'player2' ? winnerScore : loserScore
+              };
+              
+              // Mark game as finished - update scores in the actual state
+              if (winnerRole === 'player1') {
+                currentState.player1.score = winnerScore;
+                currentState.player2.score = loserScore;
+              } else {
+                currentState.player1.score = loserScore;
+                currentState.player2.score = winnerScore;
+              }
+              currentState.winner = winnerRole === 'player1' ? 'Player 1' : 'Player 2';
+              currentState.gameActive = false;
+              gameRoom.gameEndTime = Date.now();
+              
+              console.log(`🏆 Awarding win by disconnection: ${winnerData.user.username} defeats ${disconnectedData.user.username} (${winnerScore}-${loserScore})`);
+              
+              // Check if this is a tournament match
+              if (gameRoom.mode === 'tournament') {
+                console.log(`🏆 Tournament match - will be processed as tournament result`);
+                // Tournament matches are processed by processTournamentMatch in updateAllGames
+              }
+              
+              // Notify winner
+              if (winnerData.connection && winnerData.connection.readyState === 1) {
+                winnerData.connection.send(JSON.stringify({
+                  type: 'opponentDisconnected',
+                  message: 'Your opponent disconnected. You win!',
+                  winner: true
+                }));
+              }
+              
+              // Game will be processed normally by updateAllGames()
+            }
+          }
         }
       }
     }
@@ -680,10 +941,158 @@ class GameManager {
     };
   }
 
+  // Process tournament match completion
+  async processTournamentMatch(roomId, gameRoom, gameState) {
+    try {
+      console.log(`🏆 Processing tournament match: ${gameRoom.matchId} in tournament ${gameRoom.tournamentId}`);
+      
+      // Determine winner based on score
+      // gameState is the raw state object, not the class instance
+      const scores = {
+        player1: gameRoom.finalScores?.player1Score || gameState.player1?.score || 0,
+        player2: gameRoom.finalScores?.player2Score || gameState.player2?.score || 0
+      };
+      
+      console.log(`📊 Tournament match scores: P1=${scores.player1}, P2=${scores.player2}`);
+      
+      let winnerId = null;
+      let loserId = null;
+      
+      // Get player IDs from connection IDs
+      const playerIds = Array.from(gameRoom.players.keys());
+      const player1Id = playerIds[0];
+      const player2Id = playerIds[1];
+      
+      if (scores.player1 > scores.player2) {
+        winnerId = player1Id;
+        loserId = player2Id;
+      } else if (scores.player2 > scores.player1) {
+        winnerId = player2Id;
+        loserId = player1Id;
+      } else {
+        // Tie - should not happen in tournament, but handle gracefully
+        console.log(`⚠️ Tournament match ${gameRoom.matchId} ended in a tie, using player1 as winner`);
+        winnerId = player1Id;
+        loserId = player2Id;
+      }
+
+      // Get user data for both players
+      const winnerData = this.players.get(winnerId);
+      const loserData = this.players.get(loserId);
+      
+      if (!winnerData || !loserData) {
+        console.error('❌ Missing player data for tournament match');
+        return;
+      }
+
+      // Record match result in tournament manager
+      const result = this.tournamentManager.recordMatchResult(
+        gameRoom.tournamentId,
+        gameRoom.matchId,
+        winnerData.user.id
+      );
+
+      if (!result.success) {
+        console.error(`❌ Failed to record tournament match result: ${result.message}`);
+        return;
+      }
+
+      console.log(`✅ Tournament match recorded: ${winnerData.user.username} defeats ${loserData.user.username}`);
+      
+      // Apply tournament rewards to both players
+      const winnerRewards = result.winnerRewards;
+      const loserRewards = result.loserRewards;
+      
+      await this.gameStatsHandler.applyTournamentRewards(winnerData.user.id, winnerRewards, true);
+      await this.gameStatsHandler.applyTournamentRewards(loserData.user.id, loserRewards, false);
+      
+      console.log(`💰 Applied rewards - Winner: +${winnerRewards.rating_change} RR, +${winnerRewards.xp_gain} XP | Loser: ${loserRewards.rating_change} RR, ${loserRewards.xp_gain} XP`);
+      
+      // Get updated stats for both players
+      const winnerStats = await this.gameStatsHandler.getPlayerStats(winnerData.user.id);
+      const loserStats = await this.gameStatsHandler.getPlayerStats(loserData.user.id);
+      
+      // Determine if winner needs to wait for next match
+      const hasNextRound = result.nextRound && !result.tournamentComplete;
+      
+      // Send match result to winner
+      if (winnerData.connection && winnerData.connection.readyState === 1) {
+        winnerData.connection.send(JSON.stringify({
+          type: 'tournamentMatchResult',
+          won: true,
+          opponentUsername: loserData.user.username,
+          ratingChange: winnerRewards.rating_change,
+          xpGain: winnerRewards.xp_gain,
+          round: result.round,
+          tournamentComplete: result.tournamentComplete,
+          isTournamentWinner: result.tournamentComplete && result.tournamentWinner === winnerData.user.id,
+          waitingForNextRound: hasNextRound,
+          newRating: winnerStats.ranked_rating,
+          newXp: winnerStats.xp,
+          newLevel: winnerStats.level
+        }));
+      }
+      
+      // Send match result to loser
+      if (loserData.connection && loserData.connection.readyState === 1) {
+        loserData.connection.send(JSON.stringify({
+          type: 'tournamentMatchResult',
+          won: false,
+          opponentUsername: winnerData.user.username,
+          ratingChange: loserRewards.rating_change,
+          xpGain: loserRewards.xp_gain,
+          round: result.round,
+          tournamentComplete: false, // Loser is out
+          isTournamentWinner: false,
+          waitingForNextRound: false,
+          newRating: loserStats.ranked_rating,
+          newXp: loserStats.xp,
+          newLevel: loserStats.level
+        }));
+        
+        // Update loser's role to 'waiting' so they can rejoin queue
+        this.players.set(loserId, {
+          ...loserData,
+          roomId: null,
+          role: 'waiting',
+          tournamentId: null,
+          matchId: null
+        });
+      }
+      
+      // If tournament is complete, notify winner
+      if (result.tournamentComplete && result.tournamentWinner) {
+        const championData = this.players.get(result.tournamentWinner.toString());
+        if (championData && championData.connection && championData.connection.readyState === 1) {
+          championData.connection.send(JSON.stringify({
+            type: 'tournamentChampion',
+            username: championData.user.username
+          }));
+        }
+      }
+      
+      // If tournament has next round, create next matches after a delay
+      if (result.nextRound && !result.tournamentComplete) {
+        console.log(`🎯 Tournament ${gameRoom.tournamentId} advancing to ${result.nextRound}`);
+        setTimeout(() => {
+          this.createTournamentMatches(this.tournamentManager.getTournament(gameRoom.tournamentId));
+        }, 3000); // 3 second delay before next round
+      }
+      
+    } catch (error) {
+      console.error('❌ Error processing tournament match:', error);
+    }
+  }
+
   // Process game completion and update player statistics
   async processGameCompletion(roomId, gameRoom, gameState) {
     try {
       console.log(`🎯 Processing completion for game ${roomId}`);
+      
+      // Check if this is a tournament match
+      if (gameRoom.mode === 'tournament' && gameRoom.tournamentId && gameRoom.matchId) {
+        return await this.processTournamentMatch(roomId, gameRoom, gameState);
+      }
       
       // Calculate game duration for logging
       const gameDuration = gameRoom.gameStartTime 

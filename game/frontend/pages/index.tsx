@@ -4,17 +4,19 @@ export default function Home() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const [gameState, setGameState] = useState<any>(null);
-  const [screen, setScreen] = useState<"start" | "waiting" | "game" | "end">("start");
+  const [screen, setScreen] = useState<"start" | "waiting" | "game" | "end" | "tournamentWaiting">("start");
   const [isConnected, setIsConnected] = useState(false);
   const [playerInfo, setPlayerInfo] = useState<any>(null);
   const [playerStats, setPlayerStats] = useState<any>(null);
-  const [gameMode, setGameMode] = useState<"solo" | "matchmaking" | "ai">("matchmaking");
+  const [gameMode, setGameMode] = useState<"solo" | "matchmaking" | "ai" | "tournament">("matchmaking");
   const [aiDifficulty, setAiDifficulty] = useState<"easy" | "medium" | "hard" | "impossible">("medium");
   const [authError, setAuthError] = useState<string | null>(null);
   const [showTokenInput, setShowTokenInput] = useState(false);
   const [manualToken, setManualToken] = useState('');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [winScreenData, setWinScreenData] = useState<any>(null);
+  const [tournamentQueue, setTournamentQueue] = useState<any>(null);
+  const [tournamentBracket, setTournamentBracket] = useState<any>(null);
 
   // This old function has been replaced by connectWebSocketWithMode
 
@@ -177,6 +179,23 @@ export default function Home() {
     };
     checkAuth();
   }, [manualToken]); // Re-check when manual token changes
+
+  // Handle page refresh/close - disconnect from websocket and clean up
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      // Only send disconnect if we're actually leaving the page
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        console.log('🔌 Page unloading - closing WebSocket');
+        wsRef.current.close();
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, []); // Only attach once
 
   // Separate render function
   const renderGame = (state: any) => {
@@ -405,6 +424,64 @@ export default function Home() {
         
         setPlayerInfo(playerData);
         setGameState(message.gameState);
+      } else if (message.type === 'tournamentQueued') {
+        // Player joined tournament queue
+        console.log("🏆 Joined tournament queue:", message);
+        setScreen("tournamentWaiting");
+        setTournamentQueue({
+          queuePosition: message.queuePosition,
+          queueSize: message.queueSize,
+          playerList: message.playerList
+        });
+      } else if (message.type === 'tournamentStarted') {
+        // Tournament has started, show bracket
+        console.log("🎯 Tournament started:", message);
+        setTournamentBracket(message.bracket);
+        setScreen("tournamentWaiting"); // Stay on waiting screen, update to show "Tournament Starting!"
+        // Screen will change to "game" when tournamentMatchReady arrives
+      } else if (message.type === 'tournamentMatchReady') {
+        // Tournament match is ready to play
+        console.log("🎮 Tournament match ready:", message);
+        setScreen("game");
+        
+        const playerData = {
+          role: message.playerRole,
+          roomId: message.roomId,
+          gameType: 'tournament',
+          opponent: message.opponent,
+          user: playerInfo?.user,
+          tournamentId: message.tournamentId,
+          round: message.round
+        };
+        
+        setPlayerInfo(playerData);
+        setGameState(message.gameState);
+      } else if (message.type === 'tournamentMatchResult') {
+        // Tournament match ended
+        console.log("🏆 Tournament match result:", message);
+        setWinScreenData({
+          playerData: {
+            won: message.won,
+            opponent: message.opponentUsername,
+            ratingChange: message.ratingChange,
+            xpGain: message.xpGain,
+            newRating: message.newRating,
+            newXp: message.newXp,
+            newLevel: message.newLevel
+          },
+          matchData: {
+            round: message.round,
+            tournamentComplete: message.tournamentComplete,
+            isTournamentWinner: message.isTournamentWinner,
+            waitingForNextRound: message.waitingForNextRound
+          },
+          isTournament: true
+        });
+        setScreen("end");
+      } else if (message.type === 'tournamentChampion') {
+        // Player won the tournament!
+        console.log("👑 Tournament champion:", message);
+        alert(`🎉 Congratulations! You are the Tournament Champion!`);
       } else if (message.type === 'gameLeft') {
         // Player left the game, return to start screen
         setScreen("start");
@@ -422,6 +499,22 @@ export default function Home() {
         setScreen("start");
         setPlayerInfo(null);
         setGameState(null);
+      } else if (message.type === 'opponentDisconnected') {
+        // Opponent disconnected mid-game - we won!
+        console.log("🏆 Opponent disconnected - you win!");
+        alert(message.message || "Your opponent disconnected. You win!");
+        setScreen("start");
+        setPlayerInfo(null);
+        setGameState(null);
+        setWinScreenData(null);
+      } else if (message.type === 'gameAborted') {
+        // Game was aborted (early disconnection)
+        console.log("🚫 Game aborted:", message.message);
+        alert(message.message || "Game was cancelled due to disconnection.");
+        setScreen("start");
+        setPlayerInfo(null);
+        setGameState(null);
+        setWinScreenData(null);
       } else if (message.type === 'gameResult') {
         // Win screen data received
         console.log("🎉 Game result received:", message);
@@ -441,7 +534,8 @@ export default function Home() {
           renderGame(state);
           
           // Check for winner and switch to end screen
-          if (state.winner && screen !== "end") {
+          // BUT: Don't auto-switch for tournament games - wait for tournamentMatchResult
+          if (state.winner && screen !== "end" && playerInfo?.gameType !== 'tournament') {
             setScreen("end");
           }
         }
@@ -454,7 +548,8 @@ export default function Home() {
         renderGame(state);
 
         // Check for winner and switch to end screen
-        if (state.winner && screen !== "end") {
+        // BUT: Don't auto-switch for tournament games - wait for tournamentMatchResult
+        if (state.winner && screen !== "end" && playerInfo?.gameType !== 'tournament') {
           setScreen("end");
         }
       }
@@ -539,6 +634,147 @@ export default function Home() {
 
   // Win Screen Component
   const renderWinScreen = () => {
+    // Handle tournament results
+    if (winScreenData?.isTournament) {
+      const { playerData, matchData } = winScreenData;
+      const isWinner = playerData.won;
+      const isChampion = matchData.isTournamentWinner;
+      const waitingForNext = matchData.waitingForNextRound;
+      
+      return (
+        <div style={{
+          padding: "30px",
+          backgroundColor: "#1a1a1a",
+          borderRadius: "15px",
+          border: `3px solid ${isWinner ? "#ffd700" : "#dc3545"}`,
+          maxWidth: "600px",
+          margin: "0 auto",
+          textAlign: "center"
+        }}>
+          <h1 style={{
+            fontSize: "48px",
+            color: isWinner ? "#ffd700" : "#dc3545",
+            textShadow: "0 0 20px",
+            marginBottom: "20px",
+            fontWeight: "bold"
+          }}>
+            {isChampion ? "👑 TOURNAMENT CHAMPION! 👑" : 
+             isWinner ? "🎉 YOU WON! 🎉" : 
+             "💔 YOU LOST 💔"}
+          </h1>
+          
+          <div style={{ 
+            backgroundColor: "#2a2a2a", 
+            padding: "20px", 
+            borderRadius: "10px", 
+            marginBottom: "20px" 
+          }}>
+            <p style={{ fontSize: "18px", marginBottom: "10px" }}>
+              <strong>Round:</strong> {matchData.round?.replace('_', ' ').toUpperCase() || 'Unknown'}
+            </p>
+            <p style={{ fontSize: "18px", marginBottom: "10px" }}>
+              <strong>Opponent:</strong> {playerData.opponent}
+            </p>
+            <hr style={{ margin: "15px 0", borderColor: "#444" }} />
+            <p style={{ fontSize: "20px", color: playerData.ratingChange >= 0 ? "#28a745" : "#dc3545", marginBottom: "10px" }}>
+              <strong>Rating Change:</strong> {playerData.ratingChange >= 0 ? "+" : ""}{playerData.ratingChange} RR
+            </p>
+            <p style={{ fontSize: "18px", color: "#17a2b8", marginBottom: "10px" }}>
+              <strong>Experience Gained:</strong> +{playerData.xpGain} XP
+            </p>
+            <hr style={{ margin: "15px 0", borderColor: "#444" }} />
+            <p style={{ fontSize: "16px", color: "#aaa" }}>
+              <strong>Current Rating:</strong> {playerData.newRating} RR
+            </p>
+            <p style={{ fontSize: "16px", color: "#aaa" }}>
+              <strong>Current XP:</strong> {playerData.newXp} XP (Level {playerData.newLevel})
+            </p>
+          </div>
+          
+          {isChampion && (
+            <div style={{
+              backgroundColor: "#2a2a2a",
+              padding: "15px",
+              borderRadius: "10px",
+              marginBottom: "20px",
+              border: "2px solid #ffd700"
+            }}>
+              <p style={{ fontSize: "24px", color: "#ffd700", fontWeight: "bold" }}>
+                🏆 You are the Tournament Champion! 🏆
+              </p>
+            </div>
+          )}
+          
+          {waitingForNext && (
+            <div style={{
+              backgroundColor: "#2a2a2a",
+              padding: "15px",
+              borderRadius: "10px",
+              marginBottom: "20px",
+              border: "2px solid #ffd700"
+            }}>
+              <p style={{ fontSize: "18px", color: "#ffd700" }}>
+                ⏳ Waiting for next round...
+              </p>
+              <p style={{ fontSize: "14px", color: "#ccc", marginTop: "10px" }}>
+                You've advanced! Your next match will begin soon.
+              </p>
+            </div>
+          )}
+          
+          {!isWinner && (
+            <div style={{
+              backgroundColor: "#2a2a2a",
+              padding: "15px",
+              borderRadius: "10px",
+              marginBottom: "20px"
+            }}>
+              <p style={{ fontSize: "16px", color: "#ccc" }}>
+                You've been eliminated from the tournament. Good effort!
+              </p>
+            </div>
+          )}
+          
+          {/* Action Buttons */}
+          <div style={{ display: "flex", gap: "15px", justifyContent: "center", marginTop: "20px" }}>
+            {(!waitingForNext) && (
+              <button
+                onClick={() => {
+                  setScreen("start");
+                  setPlayerInfo(null);
+                  setGameState(null);
+                  setWinScreenData(null);
+                  setTournamentQueue(null);
+                  setTournamentBracket(null);
+                  if (wsRef.current) {
+                    wsRef.current.close();
+                    wsRef.current = null;
+                  }
+                }}
+                style={{
+                  padding: "12px 25px",
+                  fontSize: "16px",
+                  backgroundColor: "#007bff",
+                  color: "white",
+                  border: "none",
+                  borderRadius: "8px",
+                  cursor: "pointer",
+                  fontWeight: "bold"
+                }}
+              >
+                🏠 Return to Lobby
+              </button>
+            )}
+            {waitingForNext && (
+              <p style={{ fontSize: "14px", color: "#999", fontStyle: "italic" }}>
+                Stay connected - next round starting soon!
+              </p>
+            )}
+          </div>
+        </div>
+      );
+    }
+    
     if (!winScreenData) {
       // Fallback for AI games or when no win screen data available
       return (
@@ -1126,6 +1362,28 @@ export default function Home() {
                   (W/S vs ↑/↓ keys)
                 </small>
               </div>
+              <div style={{ textAlign: "center" }}>
+                <button
+                  onClick={() => setGameMode("tournament")}
+                  style={{
+                    padding: "10px 15px",
+                    fontSize: "14px",
+                    backgroundColor: gameMode === "tournament" ? "#28a745" : "#6c757d",
+                    color: "white",
+                    border: "none",
+                    borderRadius: "5px",
+                    cursor: "pointer",
+                    display: "block",
+                    marginBottom: "5px"
+                  }}
+                >
+                  🏆 Tournament
+                </button>
+                <small style={{ color: "#ccc", fontSize: "12px" }}>
+                  8-player bracket<br/>
+                  (Special rewards!)
+                </small>
+              </div>
             </div>
           </div>
 
@@ -1162,6 +1420,7 @@ export default function Home() {
             onClick={() => {
               if (gameMode === "matchmaking") handleStartMultiplayer();
               else if (gameMode === "ai") handleStartAI();
+              else if (gameMode === "tournament") connectWebSocketWithMode('tournament');
               else handleStartSolo();
             }}
             style={{
@@ -1176,6 +1435,7 @@ export default function Home() {
           >
             {gameMode === "matchmaking" ? "🎮 Find Opponent" : 
              gameMode === "ai" ? `🤖 Fight ${aiDifficulty.toUpperCase()} AI` : 
+             gameMode === "tournament" ? "🏆 Join Tournament" :
              "👥 Start Coop"}
           </button>
         </div>
@@ -1214,6 +1474,86 @@ export default function Home() {
             }}
           >
             Cancel
+          </button>
+        </div>
+      )}
+
+      {screen === "tournamentWaiting" && (
+        <div>
+          <h2>🏆 Tournament Queue</h2>
+          <div style={{ 
+            marginBottom: "20px",
+            padding: "25px",
+            border: "3px solid #ffc107",
+            borderRadius: "12px",
+            backgroundColor: "#1a1a1a"
+          }}>
+            <h3 style={{ color: "#ffc107", marginTop: 0 }}>
+              Waiting for Players... {tournamentQueue?.queueSize || 0}/8
+            </h3>
+            <p style={{ color: "#ccc", fontSize: "14px" }}>
+              You are #{tournamentQueue?.queuePosition || 0} in queue
+            </p>
+            
+            {/* Player List */}
+            <div style={{
+              marginTop: "20px",
+              padding: "15px",
+              backgroundColor: "#2a2a2a",
+              borderRadius: "8px"
+            }}>
+              <h4 style={{ marginTop: 0, color: "#fff" }}>Players Ready:</h4>
+              <div style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))",
+                gap: "10px"
+              }}>
+                {tournamentQueue?.playerList?.map((player: any, index: number) => (
+                  <div key={index} style={{
+                    padding: "10px",
+                    backgroundColor: "#333",
+                    borderRadius: "6px",
+                    border: player.username === playerInfo?.username ? "2px solid #ffc107" : "1px solid #444",
+                    textAlign: "center"
+                  }}>
+                    <div style={{ fontSize: "14px", fontWeight: "bold", color: "#fff" }}>
+                      {player.username}
+                    </div>
+                    <div style={{ fontSize: "11px", color: "#999" }}>
+                      Rank: {player.rank || 'Unranked'}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            
+            <div style={{ 
+              marginTop: "15px",
+              padding: "12px",
+              backgroundColor: "#2a2a2a",
+              borderRadius: "8px",
+              fontSize: "13px",
+              color: "#ccc"
+            }}>
+              <strong style={{ color: "#ffc107" }}>🎯 Tournament Format:</strong><br/>
+              • 8 players compete in a single-elimination bracket<br/>
+              • Quarterfinals → Semifinals → Finals<br/>
+              • Special reward structure for each round!
+            </div>
+          </div>
+          <button
+            onClick={cancelMatchmaking}
+            style={{
+              padding: "12px 24px",
+              fontSize: "16px",
+              backgroundColor: "#dc3545",
+              color: "white",
+              border: "none",
+              borderRadius: "5px",
+              cursor: "pointer"
+            }}
+          >
+            Leave Queue
           </button>
         </div>
       )}
