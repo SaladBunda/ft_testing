@@ -604,20 +604,21 @@ class GameManager {
     if (inputData.type === 'update') {
       // Handle movement based on player role and game mode
       const isSolo = gameRoom.mode === 'solo';
+      const isTournament = !!gameRoom.tournamentId;
       
       // Debug all player inputs
       console.log(`🎮 GameManager received from ${connectionId} (${player.role}):`, inputData);
       
       if (player.role === 'player1') {
         console.log(`➡️ Calling updatePlayerMovement for Player 1: p1DY=${inputData.player1DY || 0}`);
-        gameRoom.gameState.updatePlayerMovement(inputData.player1DY || 0, null, 'player1', false);
+        gameRoom.gameState.updatePlayerMovement(inputData.player1DY || 0, null, 'player1', false, isTournament);
       } else if (player.role === 'player2') {
         console.log(`➡️ Calling updatePlayerMovement for Player 2: p2DY=${inputData.player2DY || 0}`);
-        gameRoom.gameState.updatePlayerMovement(null, inputData.player2DY || 0, 'player2', false);
+        gameRoom.gameState.updatePlayerMovement(null, inputData.player2DY || 0, 'player2', false, isTournament);
       } else if (player.role === 'both') {
         console.log(`➡️ Calling updatePlayerMovement for Solo: p1DY=${inputData.player1DY || 0}, p2DY=${inputData.player2DY || 0}`);
         // Solo mode - handle both players
-        gameRoom.gameState.updatePlayerMovement(inputData.player1DY || 0, inputData.player2DY || 0, null, true);
+        gameRoom.gameState.updatePlayerMovement(inputData.player1DY || 0, inputData.player2DY || 0, null, true, false);
       }
     } else if (inputData.type === 'reset') {
       console.log(`Reset requested by ${connectionId} in room ${player.roomId}`);

@@ -194,8 +194,12 @@ class WebSocketHandler {
             
           } else if (data.type === "update" || data.type === "reset") {
             // Handle game input if player is in a game
-            // Use connection.id directly instead of playerInfo.connectionId
-            this.gameManager.handlePlayerInput(connection.id, data);
+            // Use the connectionId that GameManager assigned, not connection.id
+            if (playerInfo && playerInfo.connectionId) {
+              this.gameManager.handlePlayerInput(playerInfo.connectionId, data);
+            } else {
+              console.log(`⚠️ Cannot handle input - no playerInfo or connectionId`);
+            }
           } else if (data.type === "cancel") {
             // Handle matchmaking cancellation
             console.log(`🚫 User ${user.username} (${user.id}) cancelled matchmaking`);

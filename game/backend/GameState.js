@@ -42,32 +42,29 @@ class GameState {
   }
 
   // Update player movement
-  updatePlayerMovement(player1DY, player2DY, playerRole = null, isSolo = false) {
-    // Debug Player 2 movement specifically
-    if (playerRole === 'player2' || (typeof player2DY === "number" && player2DY !== null && player2DY !== undefined)) {
-      console.log(`🎮 UpdatePlayerMovement: role=${playerRole}, isSolo=${isSolo}, p1DY=${player1DY}, p2DY=${player2DY}, gameActive=${this.gameState.gameActive}`);
-      console.log(`🎮 Setting player2.dy from ${this.gameState.player2.dy} to ${player2DY}`);
+  updatePlayerMovement(player1DY, player2DY, playerRole = null, isSolo = false, isTournament = false) {
+    // Block movement during countdown for ALL game modes
+    if (this.gameState.countdown > 0) {
+      return; // Don't allow movement during countdown
     }
-    
-    // In solo mode, allow movement even during countdown or before game starts
+
+    // In solo mode, allow movement of both paddles
     if (isSolo) {
       if (typeof player1DY === "number") this.gameState.player1.dy = player1DY;
       if (typeof player2DY === "number") this.gameState.player2.dy = player2DY;
       return;
     }
 
-    // In multiplayer, allow movement even during countdown (like solo)
-    // Map player role to correct paddle
+    // Map player role to correct paddle (works for all multiplayer modes)
     if (playerRole === 'player1' && typeof player1DY === "number") {
       this.gameState.player1.dy = player1DY;
     }
     if (playerRole === 'player2' && typeof player2DY === "number") {
-      console.log(`🎮 APPLYING Player 2 movement: ${this.gameState.player2.dy} -> ${player2DY}`);
       this.gameState.player2.dy = player2DY;
     }
     
-    // If no role specified (backward compatibility), use original logic
-    if (!playerRole && (this.gameState.gameActive && !this.gameState.winner)) {
+    // Backward compatibility for older code without playerRole
+    if (!playerRole) {
       if (typeof player1DY === "number") this.gameState.player1.dy = player1DY;
       if (typeof player2DY === "number") this.gameState.player2.dy = player2DY;
     }

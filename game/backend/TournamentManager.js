@@ -286,6 +286,7 @@ class TournamentManager {
         console.log(`🎯 Tournament ${tournament.id} advancing to SEMI-FINALS`);
         
         return {
+          success: true,
           status: 'round_complete',
           nextRound: 'semi_finals',
           bracket: tournament.bracket,
@@ -305,6 +306,7 @@ class TournamentManager {
         console.log(`🏆 Tournament ${tournament.id} advancing to FINALS`);
         
         return {
+          success: true,
           status: 'round_complete',
           nextRound: 'finals',
           bracket: tournament.bracket,
@@ -320,6 +322,7 @@ class TournamentManager {
       console.log(`👑 Tournament ${tournament.id} COMPLETE! Champion: ${winner.user.username}`);
       
       return {
+        success: true,
         status: 'tournament_complete',
         champion: winner.user,
         bracket: tournament.bracket,
@@ -328,6 +331,7 @@ class TournamentManager {
     }
 
     return {
+      success: true,
       status: 'match_complete',
       winner: winner.user,
       bracket: tournament.bracket
