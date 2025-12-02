@@ -285,8 +285,8 @@ class GameStatsHandler {
             const stats = await this.getUserStats(userId);
             
             // Calculate new values
-            const newRating = Math.max(0, stats.ranked_rating + rewards.rating_change);
-            const newXp = stats.xp + rewards.xp_gain;
+            const newRating = Math.max(0, stats.rank_points + rewards.rating_change);
+            const newXp = stats.experience_points + rewards.xp_gain;
             
             // Calculate new level
             const newLevelInfo = this.progression.calculateLevel(newXp);
@@ -297,9 +297,9 @@ class GameStatsHandler {
             // Update database - only RR, XP, and level, NOT game counts
             await this.userAuth.db.run(
                 `UPDATE users 
-                 SET ranked_rating = ?, 
-                     xp = ?, 
-                     level = ?
+                 SET rank_points = ?, 
+                     experience_points = ?, 
+                     player_level = ?
                  WHERE id = ?`,
                 [newRating, newXp, newLevelInfo.level, userId]
             );
@@ -323,13 +323,13 @@ class GameStatsHandler {
     /**
      * Get player stats (simplified version for tournament)
      * @param {number} userId - User ID
-     * @returns {object} Player stats with ranked_rating, xp, and level
+     * @returns {object} Player stats with rank_points, experience_points, and player_level
      */
     async getPlayerStats(userId) {
         return new Promise((resolve, reject) => {
             const db = this.userAuth.getDb();
             db.get(
-                'SELECT ranked_rating, xp, level FROM users WHERE id = ?',
+                'SELECT rank_points, experience_points, player_level, games_played, games_won, games_lost FROM users WHERE id = ?',
                 [userId],
                 (err, row) => {
                     if (err) {

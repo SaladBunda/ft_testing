@@ -488,9 +488,7 @@ export default function Home() {
             opponent: message.opponentUsername,
             ratingChange: message.ratingChange,
             xpGain: message.xpGain,
-            newRating: message.newRating,
-            newXp: message.newXp,
-            newLevel: message.newLevel
+            stats: message.stats // Contains oldRating, newRating, oldXp, newXp, etc.
           },
           matchData: {
             round: message.round,
@@ -501,6 +499,14 @@ export default function Home() {
           isTournament: true
         });
         setScreen("end");
+        
+        // Auto-advance winners to next round after 10 seconds
+        if (message.won && message.waitingForNextRound) {
+          setTimeout(() => {
+            setWinScreenData(null);
+            setScreen("tournamentWaiting");
+          }, 10000);
+        }
       } else if (message.type === 'tournamentChampion') {
         // Player won the tournament!
         console.log("👑 Tournament champion:", message);
@@ -670,84 +676,168 @@ export default function Home() {
       const isWinner = playerData.won;
       const isChampion = matchData.isTournamentWinner;
       const waitingForNext = matchData.waitingForNextRound;
+      const stats = playerData.stats;
+      
+      // Calculate win rate
+      const winRate = stats.totalMatches > 0 ? ((stats.wins / stats.totalMatches) * 100).toFixed(1) : '0.0';
       
       return (
         <div style={{
           padding: "30px",
           backgroundColor: "#1a1a1a",
           borderRadius: "15px",
-          border: `3px solid ${isWinner ? "#ffd700" : "#dc3545"}`,
-          maxWidth: "600px",
+          border: `3px solid ${isWinner ? "#28a745" : "#dc3545"}`,
+          maxWidth: "700px",
           margin: "0 auto",
           textAlign: "center"
         }}>
+          {/* Header */}
           <h1 style={{
             fontSize: "48px",
             color: isWinner ? "#ffd700" : "#dc3545",
-            textShadow: "0 0 20px",
-            marginBottom: "20px",
+            textShadow: isWinner ? "0 0 20px #ffd700" : "0 0 20px #dc3545",
+            marginBottom: "10px",
             fontWeight: "bold"
           }}>
             {isChampion ? "👑 TOURNAMENT CHAMPION! 👑" : 
-             isWinner ? "🎉 YOU WON! 🎉" : 
-             "💔 YOU LOST 💔"}
+             isWinner ? "🎉 VICTORY! 🎉" : 
+             "💔 ELIMINATED 💔"}
           </h1>
           
-          <div style={{ 
-            backgroundColor: "#2a2a2a", 
-            padding: "20px", 
-            borderRadius: "10px", 
-            marginBottom: "20px" 
+          <p style={{ fontSize: "18px", color: "#ccc", marginBottom: "20px" }}>
+            <strong>vs</strong> {playerData.opponent}
+          </p>
+          
+          {/* Stats Changes */}
+          <div style={{
+            backgroundColor: "#2a2a2a",
+            padding: "25px",
+            borderRadius: "10px",
+            marginBottom: "20px"
           }}>
-            <p style={{ fontSize: "18px", marginBottom: "10px" }}>
-              <strong>Round:</strong> {matchData.round?.replace('_', ' ').toUpperCase() || 'Unknown'}
-            </p>
-            <p style={{ fontSize: "18px", marginBottom: "10px" }}>
-              <strong>Opponent:</strong> {playerData.opponent}
-            </p>
-            <hr style={{ margin: "15px 0", borderColor: "#444" }} />
-            <p style={{ fontSize: "20px", color: playerData.ratingChange >= 0 ? "#28a745" : "#dc3545", marginBottom: "10px" }}>
-              <strong>Rating Change:</strong> {playerData.ratingChange >= 0 ? "+" : ""}{playerData.ratingChange} RR
-            </p>
-            <p style={{ fontSize: "18px", color: "#17a2b8", marginBottom: "10px" }}>
-              <strong>Experience Gained:</strong> +{playerData.xpGain} XP
-            </p>
-            <hr style={{ margin: "15px 0", borderColor: "#444" }} />
-            <p style={{ fontSize: "16px", color: "#aaa" }}>
-              <strong>Current Rating:</strong> {playerData.newRating} RR
-            </p>
-            <p style={{ fontSize: "16px", color: "#aaa" }}>
-              <strong>Current XP:</strong> {playerData.newXp} XP (Level {playerData.newLevel})
-            </p>
+            <h3 style={{ color: "#ffc107", marginTop: 0, marginBottom: "20px" }}>
+              📊 Stats Update
+            </h3>
+            
+            {/* Ranked Rating */}
+            <div style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              padding: "12px",
+              backgroundColor: "#1a1a1a",
+              borderRadius: "8px",
+              marginBottom: "15px"
+            }}>
+              <span style={{ fontSize: "16px", color: "#aaa" }}>Ranked Rating</span>
+              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                <span style={{ fontSize: "18px", color: "#fff" }}>{stats.oldRating}</span>
+                <span style={{ 
+                  fontSize: "20px", 
+                  color: playerData.ratingChange >= 0 ? "#28a745" : "#dc3545",
+                  fontWeight: "bold"
+                }}>
+                  →
+                </span>
+                <span style={{ 
+                  fontSize: "20px", 
+                  color: playerData.ratingChange >= 0 ? "#28a745" : "#dc3545",
+                  fontWeight: "bold"
+                }}>
+                  {stats.newRating} ({playerData.ratingChange >= 0 ? '+' : ''}{playerData.ratingChange})
+                </span>
+              </div>
+            </div>
+            
+            {/* Experience */}
+            <div style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              padding: "12px",
+              backgroundColor: "#1a1a1a",
+              borderRadius: "8px",
+              marginBottom: "15px"
+            }}>
+              <span style={{ fontSize: "16px", color: "#aaa" }}>Experience</span>
+              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                <span style={{ fontSize: "18px", color: "#fff" }}>{stats.oldXp}</span>
+                <span style={{ fontSize: "20px", color: "#17a2b8", fontWeight: "bold" }}>→</span>
+                <span style={{ fontSize: "20px", color: "#17a2b8", fontWeight: "bold" }}>
+                  {stats.newXp} (+{playerData.xpGain})
+                </span>
+              </div>
+            </div>
+            
+            {/* Level */}
+            {stats.newLevel > stats.oldLevel && (
+              <div style={{
+                padding: "12px",
+                backgroundColor: "#ffc107",
+                borderRadius: "8px",
+                marginBottom: "15px",
+                border: "2px solid #ff9800"
+              }}>
+                <span style={{ fontSize: "18px", color: "#000", fontWeight: "bold" }}>
+                  🎊 LEVEL UP! Level {stats.oldLevel} → {stats.newLevel} 🎊
+                </span>
+              </div>
+            )}
+            
+            {/* Match Stats */}
+            <div style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr 1fr",
+              gap: "10px",
+              marginTop: "15px"
+            }}>
+              <div style={{ textAlign: "center" }}>
+                <div style={{ fontSize: "14px", color: "#aaa" }}>Matches</div>
+                <div style={{ fontSize: "20px", color: "#fff", fontWeight: "bold" }}>{stats.totalMatches}</div>
+              </div>
+              <div style={{ textAlign: "center" }}>
+                <div style={{ fontSize: "14px", color: "#aaa" }}>Wins</div>
+                <div style={{ fontSize: "20px", color: "#28a745", fontWeight: "bold" }}>{stats.wins}</div>
+              </div>
+              <div style={{ textAlign: "center" }}>
+                <div style={{ fontSize: "14px", color: "#aaa" }}>Win Rate</div>
+                <div style={{ fontSize: "20px", color: "#17a2b8", fontWeight: "bold" }}>{winRate}%</div>
+              </div>
+            </div>
           </div>
           
+          {/* Special Messages */}
           {isChampion && (
             <div style={{
               backgroundColor: "#2a2a2a",
-              padding: "15px",
+              padding: "20px",
               borderRadius: "10px",
               marginBottom: "20px",
-              border: "2px solid #ffd700"
+              border: "3px solid #ffd700",
+              boxShadow: "0 0 20px #ffd700"
             }}>
-              <p style={{ fontSize: "24px", color: "#ffd700", fontWeight: "bold" }}>
+              <p style={{ fontSize: "24px", color: "#ffd700", fontWeight: "bold", margin: 0 }}>
                 🏆 You are the Tournament Champion! 🏆
+              </p>
+              <p style={{ fontSize: "14px", color: "#ccc", marginTop: "10px", marginBottom: 0 }}>
+                Congratulations on your flawless victory!
               </p>
             </div>
           )}
           
-          {waitingForNext && (
+          {isWinner && waitingForNext && !isChampion && (
             <div style={{
               backgroundColor: "#2a2a2a",
-              padding: "15px",
+              padding: "18px",
               borderRadius: "10px",
               marginBottom: "20px",
-              border: "2px solid #ffd700"
+              border: "2px solid #28a745"
             }}>
-              <p style={{ fontSize: "18px", color: "#ffd700" }}>
-                ⏳ Waiting for next round...
+              <p style={{ fontSize: "18px", color: "#28a745", fontWeight: "bold", margin: 0 }}>
+                ✅ You've Advanced to the Next Round!
               </p>
-              <p style={{ fontSize: "14px", color: "#ccc", marginTop: "10px" }}>
-                You've advanced! Your next match will begin soon.
+              <p style={{ fontSize: "14px", color: "#ccc", marginTop: "10px", marginBottom: 0 }}>
+                Next match starting in 10 seconds...
               </p>
             </div>
           )}
@@ -755,19 +845,46 @@ export default function Home() {
           {!isWinner && (
             <div style={{
               backgroundColor: "#2a2a2a",
-              padding: "15px",
+              padding: "18px",
               borderRadius: "10px",
-              marginBottom: "20px"
+              marginBottom: "20px",
+              border: "2px solid #dc3545"
             }}>
-              <p style={{ fontSize: "16px", color: "#ccc" }}>
-                You've been eliminated from the tournament. Good effort!
+              <p style={{ fontSize: "16px", color: "#dc3545", margin: 0 }}>
+                You have been eliminated from the tournament.
+              </p>
+              <p style={{ fontSize: "14px", color: "#aaa", marginTop: "10px", marginBottom: 0 }}>
+                Better luck next time!
               </p>
             </div>
           )}
           
           {/* Action Buttons */}
           <div style={{ display: "flex", gap: "15px", justifyContent: "center", marginTop: "20px" }}>
-            {(!waitingForNext) && (
+            {isWinner && waitingForNext ? (
+              // Winner waiting for next round - show Continue button with auto-advance
+              <button
+                onClick={() => {
+                  // Continue is automatic, this just speeds it up
+                  setWinScreenData(null);
+                  setScreen("tournamentWaiting");
+                }}
+                style={{
+                  padding: "15px 30px",
+                  fontSize: "18px",
+                  backgroundColor: "#28a745",
+                  color: "white",
+                  border: "none",
+                  borderRadius: "8px",
+                  cursor: "pointer",
+                  fontWeight: "bold",
+                  boxShadow: "0 4px 8px rgba(0,0,0,0.3)"
+                }}
+              >
+                ➡️ Continue (10s)
+              </button>
+            ) : (
+              // Loser or champion - return to lobby
               <button
                 onClick={() => {
                   setScreen("start");
@@ -782,23 +899,19 @@ export default function Home() {
                   }
                 }}
                 style={{
-                  padding: "12px 25px",
-                  fontSize: "16px",
+                  padding: "15px 30px",
+                  fontSize: "18px",
                   backgroundColor: "#007bff",
                   color: "white",
                   border: "none",
                   borderRadius: "8px",
                   cursor: "pointer",
-                  fontWeight: "bold"
+                  fontWeight: "bold",
+                  boxShadow: "0 4px 8px rgba(0,0,0,0.3)"
                 }}
               >
-                🏠 Return to Lobby
+                🏠 Return to Main Menu
               </button>
-            )}
-            {waitingForNext && (
-              <p style={{ fontSize: "14px", color: "#999", fontStyle: "italic" }}>
-                Stay connected - next round starting soon!
-              </p>
             )}
           </div>
         </div>

@@ -1033,6 +1033,10 @@ class GameManager {
 
       console.log(`✅ Tournament match recorded: ${winnerData.user.username} defeats ${loserData.user.username}`);
       
+      // Get stats BEFORE applying rewards
+      const winnerStatsBefore = await this.statsHandler.getPlayerStats(winnerData.user.id);
+      const loserStatsBefore = await this.statsHandler.getPlayerStats(loserData.user.id);
+      
       // Apply tournament rewards to both players
       const winnerRewards = result.winnerRewards;
       const loserRewards = result.loserRewards;
@@ -1057,13 +1061,21 @@ class GameManager {
           opponentUsername: loserData.user.username,
           ratingChange: winnerRewards.rating_change,
           xpGain: winnerRewards.xp_gain,
-          round: result.round,
-          tournamentComplete: result.tournamentComplete,
-          isTournamentWinner: result.tournamentComplete && result.tournamentWinner === winnerData.user.id,
+          round: result.nextRound || 'complete',
+          tournamentComplete: result.tournamentComplete || false,
+          isTournamentWinner: result.status === 'tournament_complete',
           waitingForNextRound: hasNextRound,
-          newRating: winnerStats.ranked_rating,
-          newXp: winnerStats.xp,
-          newLevel: winnerStats.level
+          stats: {
+            oldRating: winnerStatsBefore.rank_points,
+            newRating: winnerStats.rank_points,
+            oldXp: winnerStatsBefore.experience_points,
+            newXp: winnerStats.experience_points,
+            oldLevel: winnerStatsBefore.player_level,
+            newLevel: winnerStats.player_level,
+            totalMatches: winnerStats.games_played,
+            wins: winnerStats.games_won,
+            losses: winnerStats.games_lost
+          }
         }));
       }
       
@@ -1075,13 +1087,21 @@ class GameManager {
           opponentUsername: winnerData.user.username,
           ratingChange: loserRewards.rating_change,
           xpGain: loserRewards.xp_gain,
-          round: result.round,
+          round: 'eliminated',
           tournamentComplete: false, // Loser is out
           isTournamentWinner: false,
           waitingForNextRound: false,
-          newRating: loserStats.ranked_rating,
-          newXp: loserStats.xp,
-          newLevel: loserStats.level
+          stats: {
+            oldRating: loserStatsBefore.rank_points,
+            newRating: loserStats.rank_points,
+            oldXp: loserStatsBefore.experience_points,
+            newXp: loserStats.experience_points,
+            oldLevel: loserStatsBefore.player_level,
+            newLevel: loserStats.player_level,
+            totalMatches: loserStats.games_played,
+            wins: loserStats.games_won,
+            losses: loserStats.games_lost
+          }
         }));
         
         // Update loser's role to 'waiting' so they can rejoin queue

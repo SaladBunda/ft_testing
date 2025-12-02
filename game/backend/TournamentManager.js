@@ -240,8 +240,8 @@ class TournamentManager {
     console.log(`✅ Match ${matchId} result: ${winner.user.username} defeats ${loser.user.username}`);
     console.log(`💰 Rewards - Winner: ${rewards.rankPoints} RR, ${rewards.experience} XP | Loser: ${loserRewards.rankPoints} RR, ${loserRewards.experience} XP`);
 
-    // Advance tournament
-    return this.advanceTournament(tournament, match, winner, round);
+    // Advance tournament (pass rewards to include in return)
+    return this.advanceTournament(tournament, match, winner, round, rewards, loserRewards);
   }
 
   /**
@@ -263,13 +263,22 @@ class TournamentManager {
       }
     };
 
-    return rewards[round][outcome];
+    const reward = rewards[round][outcome];
+    
+    // Convert to format expected by GameStatsHandler
+    return {
+      rating_change: reward.rankPoints,
+      xp_gain: reward.experience,
+      // Keep original names for display
+      rankPoints: reward.rankPoints,
+      experience: reward.experience
+    };
   }
 
   /**
    * Advance tournament to next round
    */
-  advanceTournament(tournament, completedMatch, winner, round) {
+  advanceTournament(tournament, completedMatch, winner, round, winnerRewards, loserRewards) {
     if (round === 'quarterFinals') {
       // Check if all quarter-final matches are complete
       const allQuartersComplete = tournament.bracket.quarterFinals.every(m => m.winner !== null);
@@ -289,7 +298,9 @@ class TournamentManager {
           status: 'round_complete',
           nextRound: 'semi_finals',
           bracket: tournament.bracket,
-          message: 'Quarter-finals complete! Semi-finals starting...'
+          message: 'Quarter-finals complete! Semi-finals starting...',
+          winnerRewards: winnerRewards,
+          loserRewards: loserRewards
         };
       }
     } else if (round === 'semiFinals') {
@@ -309,7 +320,9 @@ class TournamentManager {
           status: 'round_complete',
           nextRound: 'finals',
           bracket: tournament.bracket,
-          message: 'Semi-finals complete! FINALS starting...'
+          message: 'Semi-finals complete! FINALS starting...',
+          winnerRewards: winnerRewards,
+          loserRewards: loserRewards
         };
       }
     } else if (round === 'finals') {
@@ -325,7 +338,10 @@ class TournamentManager {
         status: 'tournament_complete',
         champion: winner.user,
         bracket: tournament.bracket,
-        message: `Tournament complete! ${winner.user.username} is the CHAMPION!`
+        message: `Tournament complete! ${winner.user.username} is the CHAMPION!`,
+        winnerRewards: winnerRewards,
+        loserRewards: loserRewards,
+        tournamentComplete: true
       };
     }
 
@@ -333,7 +349,9 @@ class TournamentManager {
       success: true,
       status: 'match_complete',
       winner: winner.user,
-      bracket: tournament.bracket
+      bracket: tournament.bracket,
+      winnerRewards: winnerRewards,
+      loserRewards: loserRewards
     };
   }
 
