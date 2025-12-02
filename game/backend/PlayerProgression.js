@@ -180,10 +180,25 @@ class PlayerProgression {
      * @returns {object} Level information
      */
     calculateLevel(experiencePoints = 0) {
-        // Simple level calculation: 100 XP per level
-        const level = Math.floor(experiencePoints / 100) + 1;
-        const currentLevelXP = experiencePoints % 100;
-        const nextLevelXP = 100;
+        // Progressive XP requirements: Level 1->2 needs 50 XP, then increases by 10 XP per level
+        // Level 1: 0-49 (50 XP)
+        // Level 2: 50-109 (60 XP)
+        // Level 3: 110-179 (70 XP)
+        // Level 4: 180-259 (80 XP)
+        // etc.
+        
+        let level = 1;
+        let xpNeeded = 50; // XP needed for level 2
+        let totalXpForLevel = 0;
+        
+        while (experiencePoints >= totalXpForLevel + xpNeeded) {
+            totalXpForLevel += xpNeeded;
+            level++;
+            xpNeeded = 50 + ((level - 1) * 10); // Increases by 10 XP per level
+        }
+        
+        const currentLevelXP = experiencePoints - totalXpForLevel;
+        const nextLevelXP = 50 + ((level - 1) * 10);
         
         return {
             level: level,
