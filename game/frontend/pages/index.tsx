@@ -3,6 +3,7 @@ import React, { useEffect, useRef, useState } from "react";
 export default function Home() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const tournamentWaitingTimeoutRef = useRef<any>(null);
   const [gameState, setGameState] = useState<any>(null);
   const [screen, setScreen] = useState<"start" | "waiting" | "game" | "end" | "tournamentWaiting" | "tournamentMatchReady">("start");
   const [isConnected, setIsConnected] = useState(false);
@@ -445,6 +446,12 @@ export default function Home() {
         // Tournament match is ready to play
         console.log("🎮 Tournament match ready:", message);
         
+        // Clear any pending tournament waiting timeout from previous match
+        if (tournamentWaitingTimeoutRef.current) {
+          clearTimeout(tournamentWaitingTimeoutRef.current);
+          tournamentWaitingTimeoutRef.current = null;
+        }
+        
         // Store match info and show match ready screen
         setMatchReadyInfo({
           opponent: message.opponent,
@@ -503,7 +510,7 @@ export default function Home() {
         
         // Auto-advance winners to next round after 10 seconds
         if (message.won && message.waitingForNextRound) {
-          setTimeout(() => {
+          tournamentWaitingTimeoutRef.current = setTimeout(() => {
             setWinScreenData(null);
             setScreen("tournamentWaiting");
           }, 10000);
