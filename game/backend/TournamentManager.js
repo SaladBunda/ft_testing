@@ -95,11 +95,10 @@ class TournamentManager {
       return null;
     }
 
-    // Take first 8 players from queue and CLEAR the queue
+    // Take first 8 players from queue (keep any extras for next tournament)
     const players = this.playerQueue.splice(0, this.REQUIRED_PLAYERS);
     
-    // Clear any remaining players in queue (should be empty but just in case)
-    this.playerQueue = [];
+    console.log(`🎪 Starting tournament with 8 players. Remaining in queue: ${this.playerQueue.length}`);
     
     // Shuffle players for random bracket seeding
     this.shuffleArray(players);

@@ -4,7 +4,7 @@ export default function Home() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const [gameState, setGameState] = useState<any>(null);
-  const [screen, setScreen] = useState<"start" | "waiting" | "game" | "end" | "tournamentWaiting">("start");
+  const [screen, setScreen] = useState<"start" | "waiting" | "game" | "end" | "tournamentWaiting" | "tournamentMatchReady">("start");
   const [isConnected, setIsConnected] = useState(false);
   const [playerInfo, setPlayerInfo] = useState<any>(null);
   const [playerStats, setPlayerStats] = useState<any>(null);
@@ -17,6 +17,7 @@ export default function Home() {
   const [winScreenData, setWinScreenData] = useState<any>(null);
   const [tournamentQueue, setTournamentQueue] = useState<any>(null);
   const [tournamentBracket, setTournamentBracket] = useState<any>(null);
+  const [matchReadyInfo, setMatchReadyInfo] = useState<any>(null);
 
   // This old function has been replaced by connectWebSocketWithMode
 
@@ -437,25 +438,47 @@ export default function Home() {
         // Tournament has started, show bracket
         console.log("🎯 Tournament started:", message);
         setTournamentBracket(message.bracket);
+        // Keep tournamentQueue so we can show player list, but bracket presence indicates tournament started
         setScreen("tournamentWaiting"); // Stay on waiting screen, update to show "Tournament Starting!"
         // Screen will change to "game" when tournamentMatchReady arrives
       } else if (message.type === 'tournamentMatchReady') {
         // Tournament match is ready to play
         console.log("🎮 Tournament match ready:", message);
-        setScreen("game");
         
-        const playerData = {
-          role: message.playerRole,
-          roomId: message.roomId,
-          gameType: 'tournament',
+        // Store match info and show match ready screen
+        setMatchReadyInfo({
           opponent: message.opponent,
-          user: playerInfo?.user,
-          tournamentId: message.tournamentId,
-          round: message.round
-        };
+          playerRole: message.playerRole,
+          round: message.round,
+          matchId: message.matchId
+        });
+        setScreen("tournamentMatchReady");
         
-        setPlayerInfo(playerData);
-        setGameState(message.gameState);
+        // Send the match data back to backend so it can set playerInfo
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          wsRef.current.send(JSON.stringify({
+            type: 'tournamentMatchReady',
+            matchData: message.matchData
+          }));
+        }
+        
+        // After 3 seconds, start the game
+        setTimeout(() => {
+          setScreen("game");
+          
+          const playerData = {
+            role: message.playerRole,
+            roomId: message.roomId,
+            gameType: 'tournament',
+            opponent: message.opponent,
+            user: playerInfo?.user,
+            tournamentId: message.tournamentId,
+            round: message.round
+          };
+          
+          setPlayerInfo(playerData);
+          setGameState(message.gameState);
+        }, 3000);
       } else if (message.type === 'tournamentMatchResult') {
         // Tournament match ended
         console.log("🏆 Tournament match result:", message);
@@ -518,6 +541,13 @@ export default function Home() {
       } else if (message.type === 'gameResult') {
         // Win screen data received
         console.log("🎉 Game result received:", message);
+        
+        // Don't show normal win screen for tournament games - wait for tournamentMatchResult instead
+        if (playerInfo?.gameType === 'tournament') {
+          console.log("⏭️ Skipping normal win screen for tournament game");
+          return;
+        }
+        
         setWinScreenData({
           playerData: message.data,
           matchData: message.matchData
@@ -1037,7 +1067,27 @@ export default function Home() {
               maxWidth: "600px",
               margin: "0 auto 25px auto"
             }}>
-              <h3 style={{ margin: "0 0 15px 0", color: "#ffc107" }}>Player Statistics</h3>
+              <div style={{ 
+                display: "flex", 
+                justifyContent: "space-between", 
+                alignItems: "center",
+                marginBottom: "15px"
+              }}>
+                <h3 style={{ margin: 0, color: "#ffc107" }}>Player Statistics</h3>
+                {playerInfo?.username && (
+                  <div style={{ 
+                    fontSize: "16px", 
+                    color: "#4CAF50",
+                    fontWeight: "bold",
+                    padding: "5px 12px",
+                    backgroundColor: "#2a2a2a",
+                    borderRadius: "6px",
+                    border: "1px solid #4CAF50"
+                  }}>
+                    @{playerInfo.username}
+                  </div>
+                )}
+              </div>
               
               <div style={{ 
                 display: "grid", 
@@ -1488,44 +1538,69 @@ export default function Home() {
             borderRadius: "12px",
             backgroundColor: "#1a1a1a"
           }}>
-            <h3 style={{ color: "#ffc107", marginTop: 0 }}>
-              Waiting for Players... {tournamentQueue?.queueSize || 0}/8
-            </h3>
-            <p style={{ color: "#ccc", fontSize: "14px" }}>
-              You are #{tournamentQueue?.queuePosition || 0} in queue
-            </p>
+            {tournamentBracket ? (
+              // Tournament has started, waiting for match assignment
+              <>
+                <h3 style={{ color: "#ffc107", marginTop: 0 }}>
+                  🎪 Tournament Starting!
+                </h3>
+                <p style={{ color: "#ccc", fontSize: "14px" }}>
+                  Preparing your match...
+                </p>
+                <div style={{ 
+                  marginTop: "20px",
+                  fontSize: "16px",
+                  color: "#17a2b8",
+                  animation: "pulse 1s infinite"
+                }}>
+                  ⏳ Match assignment incoming...
+                </div>
+              </>
+            ) : (
+              // Still waiting in queue
+              <>
+                <h3 style={{ color: "#ffc107", marginTop: 0 }}>
+                  Waiting for Players... {tournamentQueue?.queueSize || 0}/8
+                </h3>
+                <p style={{ color: "#ccc", fontSize: "14px" }}>
+                  You are #{tournamentQueue?.queuePosition || 0} in queue
+                </p>
+              </>
+            )}
             
-            {/* Player List */}
-            <div style={{
-              marginTop: "20px",
-              padding: "15px",
-              backgroundColor: "#2a2a2a",
-              borderRadius: "8px"
-            }}>
-              <h4 style={{ marginTop: 0, color: "#fff" }}>Players Ready:</h4>
+            {/* Player List - only show if we have queue data */}
+            {tournamentQueue?.playerList && (
               <div style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))",
-                gap: "10px"
+                marginTop: "20px",
+                padding: "15px",
+                backgroundColor: "#2a2a2a",
+                borderRadius: "8px"
               }}>
-                {tournamentQueue?.playerList?.map((player: any, index: number) => (
-                  <div key={index} style={{
-                    padding: "10px",
-                    backgroundColor: "#333",
-                    borderRadius: "6px",
-                    border: player.username === playerInfo?.username ? "2px solid #ffc107" : "1px solid #444",
-                    textAlign: "center"
-                  }}>
-                    <div style={{ fontSize: "14px", fontWeight: "bold", color: "#fff" }}>
-                      {player.username}
+                <h4 style={{ marginTop: 0, color: "#fff" }}>Players Ready:</h4>
+                <div style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))",
+                  gap: "10px"
+                }}>
+                  {tournamentQueue.playerList.map((player: any, index: number) => (
+                    <div key={index} style={{
+                      padding: "10px",
+                      backgroundColor: "#333",
+                      borderRadius: "6px",
+                      border: player.username === playerInfo?.username ? "2px solid #ffc107" : "1px solid #444",
+                      textAlign: "center"
+                    }}>
+                      <div style={{ fontSize: "14px", fontWeight: "bold", color: "#fff" }}>
+                        {player.username}
+                      </div>
+                      <div style={{ fontSize: "11px", color: "#999" }}>
+                        Rank: {player.rank || 'Unranked'}
+                      </div>
                     </div>
-                    <div style={{ fontSize: "11px", color: "#999" }}>
-                      Rank: {player.rank || 'Unranked'}
-                    </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
             
             <div style={{ 
               marginTop: "15px",
@@ -1558,11 +1633,115 @@ export default function Home() {
         </div>
       )}
 
+      {screen === "tournamentMatchReady" && matchReadyInfo && (
+        <div style={{
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          minHeight: "400px",
+          padding: "40px"
+        }}>
+          <h2 style={{ 
+            fontSize: "36px", 
+            color: "#ffc107", 
+            marginBottom: "30px",
+            textTransform: "uppercase",
+            letterSpacing: "2px"
+          }}>
+            🎮 Match Ready!
+          </h2>
+          
+          <div style={{
+            backgroundColor: "#1a1a1a",
+            border: "3px solid #ffc107",
+            borderRadius: "15px",
+            padding: "40px",
+            textAlign: "center",
+            maxWidth: "600px",
+            width: "100%"
+          }}>
+            <div style={{ fontSize: "20px", marginBottom: "30px", color: "#ccc" }}>
+              <strong style={{ color: "#ffc107" }}>
+                {matchReadyInfo.round === 'quarter_finals' ? 'Quarter Finals' : 
+                 matchReadyInfo.round === 'semi_finals' ? 'Semi Finals' : 'Finals'}
+              </strong>
+              <span style={{ margin: "0 10px", color: "#666" }}>•</span>
+              Match #{matchReadyInfo.matchId}
+            </div>
+            
+            <div style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-around",
+              fontSize: "24px",
+              marginBottom: "40px"
+            }}>
+              <div style={{ 
+                flex: 1, 
+                padding: "20px",
+                backgroundColor: "#28a745",
+                borderRadius: "10px",
+                border: "2px solid #20c997"
+              }}>
+                <div style={{ fontSize: "14px", color: "#ccc", marginBottom: "10px" }}>YOU</div>
+                <div style={{ fontSize: "28px", fontWeight: "bold" }}>
+                  {playerInfo?.username || "Player"}
+                </div>
+                <div style={{ fontSize: "12px", color: "#ccc", marginTop: "5px" }}>
+                  {matchReadyInfo.playerRole === 'player1' ? 'Left Paddle' : 'Right Paddle'}
+                </div>
+              </div>
+              
+              <div style={{ 
+                margin: "0 30px", 
+                fontSize: "40px", 
+                color: "#ffc107",
+                fontWeight: "bold"
+              }}>
+                VS
+              </div>
+              
+              <div style={{ 
+                flex: 1, 
+                padding: "20px",
+                backgroundColor: "#dc3545",
+                borderRadius: "10px",
+                border: "2px solid #e74c3c"
+              }}>
+                <div style={{ fontSize: "14px", color: "#ccc", marginBottom: "10px" }}>OPPONENT</div>
+                <div style={{ fontSize: "28px", fontWeight: "bold" }}>
+                  {matchReadyInfo.opponent?.username || "Opponent"}
+                </div>
+                <div style={{ fontSize: "12px", color: "#ccc", marginTop: "5px" }}>
+                  {matchReadyInfo.playerRole === 'player1' ? 'Right Paddle' : 'Left Paddle'}
+                </div>
+              </div>
+            </div>
+            
+            <div style={{ 
+              fontSize: "18px", 
+              color: "#17a2b8",
+              animation: "pulse 1s infinite"
+            }}>
+              ⏳ Game starting in 3 seconds...
+            </div>
+          </div>
+        </div>
+      )}
+
       {screen === "game" && (
         <div>
           <div style={{ marginBottom: "10px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "5px" }}>
-              <span>Player 1: {gameState?.player1?.score || 0}</span>
+              <div style={{ flex: 1, textAlign: "left" }}>
+                <div style={{ fontWeight: "bold" }}>Player 1: {gameState?.player1?.score || 0}</div>
+                <div style={{ fontSize: "12px", color: "#aaa" }}>
+                  {playerInfo?.role === 'player1' 
+                    ? `👤 ${playerInfo?.user?.username || 'You'}` 
+                    : `👤 ${playerInfo?.opponent?.username || 'Opponent'}`}
+                </div>
+              </div>
               <span style={{ 
                 padding: "2px 8px", 
                 backgroundColor: playerInfo?.gameType === 'solo' ? "#ffc107" : "#17a2b8",
@@ -1571,7 +1750,14 @@ export default function Home() {
               }}>
                 {playerInfo?.gameType === 'solo' ? "Practice Mode" : `Multiplayer - You are ${playerInfo?.role}`}
               </span>
-              <span>Player 2: {gameState?.player2?.score || 0}</span>
+              <div style={{ flex: 1, textAlign: "right" }}>
+                <div style={{ fontWeight: "bold" }}>Player 2: {gameState?.player2?.score || 0}</div>
+                <div style={{ fontSize: "12px", color: "#aaa" }}>
+                  {playerInfo?.role === 'player2' 
+                    ? `👤 ${playerInfo?.user?.username || 'You'}` 
+                    : `👤 ${playerInfo?.opponent?.username || 'Opponent'}`}
+                </div>
+              </div>
             </div>
             
             <p>Connection: {isConnected ? "🟢 Connected" : "🔴 Disconnected"}</p>

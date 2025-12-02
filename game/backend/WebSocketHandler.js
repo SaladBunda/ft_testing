@@ -48,6 +48,13 @@ class WebSocketHandler {
         // Set user online
         await this.userAuth.setUserOnlineStatus(user.id, true);
         
+        // Set up heartbeat to keep connection alive
+        const heartbeatInterval = setInterval(() => {
+          if (connection.socket.readyState === 1) { // WebSocket.OPEN
+            connection.socket.send(JSON.stringify({ type: 'ping' }));
+          }
+        }, 30000); // Send ping every 30 seconds
+        
         let playerInfo = null;
 
         // Send authentication success
@@ -192,6 +199,19 @@ class WebSocketHandler {
               }
             }
             
+          } else if (data.type === "tournamentMatchReady") {
+            // Tournament match is ready, set playerInfo
+            const matchData = data.matchData;
+            if (matchData) {
+              // Find which player this connection is
+              if (matchData.player1 && matchData.player1.user.id === user.id) {
+                playerInfo = matchData.player1;
+                console.log(`🏆 Tournament match ready: ${user.username} is Player 1`);
+              } else if (matchData.player2 && matchData.player2.user.id === user.id) {
+                playerInfo = matchData.player2;
+                console.log(`🏆 Tournament match ready: ${user.username} is Player 2`);
+              }
+            }
           } else if (data.type === "update" || data.type === "reset") {
             // Handle game input if player is in a game
             // Use the connectionId that GameManager assigned, not connection.id
@@ -215,8 +235,14 @@ class WebSocketHandler {
         });
 
         // Handle disconnection
+        // Handle disconnection
         connection.socket.on("close", async () => {
           console.log(`🔌 User ${user.username} (${user.id}) disconnected`);
+          
+          // Clear heartbeat interval
+          if (heartbeatInterval) {
+            clearInterval(heartbeatInterval);
+          }
           
           // Set user offline
           await this.userAuth.setUserOnlineStatus(user.id, false);

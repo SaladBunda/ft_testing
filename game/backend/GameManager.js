@@ -339,46 +339,65 @@ class GameManager {
     
     console.log(`🎯 Found ${matches.length} matches to create`);
     
-    // Create game rooms for each match
+    // FIRST PASS: Find all connectionIds for all players across all matches
+    const matchConnections = [];
+    
     for (const match of matches) {
       if (match.player1 && match.player2 && !match.winner) {
-        console.log(`🔨 Creating match ${match.match}: ${match.player1.user.username} vs ${match.player2.user.username}`);
-        this.createTournamentMatch(tournament.id, match);
+        const player1Data = match.player1;
+        const player2Data = match.player2;
+        
+        console.log(`🔍 Looking for connections - Match ${match.match}: ${player1Data.user.username} (ID: ${player1Data.user.id}) vs ${player2Data.user.username} (ID: ${player2Data.user.id})`);
+        
+        let player1ConnectionId = null;
+        let player2ConnectionId = null;
+        
+        // Find connection IDs for these players
+        for (const [connId, playerInfo] of this.players.entries()) {
+          if (playerInfo.user && playerInfo.user.id === player1Data.user.id) {
+            player1ConnectionId = connId;
+            console.log(`   ✅ Found P1 connection: ${connId}`);
+          }
+          if (playerInfo.user && playerInfo.user.id === player2Data.user.id) {
+            player2ConnectionId = connId;
+            console.log(`   ✅ Found P2 connection: ${connId}`);
+          }
+        }
+        
+        if (!player1ConnectionId || !player2ConnectionId) {
+          console.log(`❌ Could not find connections for tournament match ${match.match} - P1: ${player1ConnectionId}, P2: ${player2ConnectionId}`);
+          continue;
+        }
+        
+        matchConnections.push({
+          match,
+          player1ConnectionId,
+          player2ConnectionId,
+          player1Data,
+          player2Data
+        });
       }
+    }
+    
+    // SECOND PASS: Now create all the matches with the found connectionIds
+    console.log(`🎯 Creating ${matchConnections.length} matches`);
+    for (const matchInfo of matchConnections) {
+      console.log(`🔨 Creating match ${matchInfo.match.match}: ${matchInfo.player1Data.user.username} vs ${matchInfo.player2Data.user.username}`);
+      this.createTournamentMatch(tournament.id, matchInfo);
     }
   }
 
   // Create a single tournament match
-  createTournamentMatch(tournamentId, match) {
+  createTournamentMatch(tournamentId, matchInfo) {
+    const match = matchInfo.match;
+    const player1ConnectionId = matchInfo.player1ConnectionId;
+    const player2ConnectionId = matchInfo.player2ConnectionId;
+    const player1Data = matchInfo.player1Data;
+    const player2Data = matchInfo.player2Data;
+    
     const roomId = this.generateRoomId();
     const gameState = new GameState('tournament');
     const gameLoop = new GameLoop(gameState);
-    
-    const player1Data = match.player1;
-    const player2Data = match.player2;
-    
-    console.log(`🔍 Looking for connections - P1: ${player1Data.user.username} (ID: ${player1Data.user.id}), P2: ${player2Data.user.username} (ID: ${player2Data.user.id})`);
-    
-    // Find connection IDs for these players
-    let player1ConnectionId = null;
-    let player2ConnectionId = null;
-    
-    for (const [connId, playerInfo] of this.players.entries()) {
-      console.log(`   Checking connection ${connId}: user ${playerInfo.user?.username} (ID: ${playerInfo.user?.id}), role: ${playerInfo.role}`);
-      if (playerInfo.user && playerInfo.user.id === player1Data.user.id) {
-        player1ConnectionId = connId;
-        console.log(`   ✅ Found P1 connection: ${connId}`);
-      }
-      if (playerInfo.user && playerInfo.user.id === player2Data.user.id) {
-        player2ConnectionId = connId;
-        console.log(`   ✅ Found P2 connection: ${connId}`);
-      }
-    }
-    
-    if (!player1ConnectionId || !player2ConnectionId) {
-      console.log(`❌ Could not find connections for tournament match ${match.match} - P1: ${player1ConnectionId}, P2: ${player2ConnectionId}`);
-      return;
-    }
     
     const gameRoom = {
       mode: 'tournament',
@@ -430,7 +449,21 @@ class GameManager {
       matchId: match.match,
       roomId: roomId,
       round: this.tournamentManager.getTournament(tournamentId).status,
-      gameState: gameState.getState()
+      gameState: gameState.getState(),
+      matchData: {
+        player1: {
+          connectionId: player1ConnectionId,
+          role: 'player1',
+          user: player1Data.user,
+          roomId: roomId
+        },
+        player2: {
+          connectionId: player2ConnectionId,
+          role: 'player2',
+          user: player2Data.user,
+          roomId: roomId
+        }
+      }
     };
     
     if (player1Data.connection) {
@@ -1004,14 +1037,14 @@ class GameManager {
       const winnerRewards = result.winnerRewards;
       const loserRewards = result.loserRewards;
       
-      await this.gameStatsHandler.applyTournamentRewards(winnerData.user.id, winnerRewards, true);
-      await this.gameStatsHandler.applyTournamentRewards(loserData.user.id, loserRewards, false);
+      await this.statsHandler.applyTournamentRewards(winnerData.user.id, winnerRewards, true);
+      await this.statsHandler.applyTournamentRewards(loserData.user.id, loserRewards, false);
       
       console.log(`💰 Applied rewards - Winner: +${winnerRewards.rating_change} RR, +${winnerRewards.xp_gain} XP | Loser: ${loserRewards.rating_change} RR, ${loserRewards.xp_gain} XP`);
       
       // Get updated stats for both players
-      const winnerStats = await this.gameStatsHandler.getPlayerStats(winnerData.user.id);
-      const loserStats = await this.gameStatsHandler.getPlayerStats(loserData.user.id);
+      const winnerStats = await this.statsHandler.getPlayerStats(winnerData.user.id);
+      const loserStats = await this.statsHandler.getPlayerStats(loserData.user.id);
       
       // Determine if winner needs to wait for next match
       const hasNextRound = result.nextRound && !result.tournamentComplete;
