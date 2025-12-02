@@ -841,6 +841,14 @@ class GameManager {
     // Remove from waiting queue if present
     this.waitingPlayers = this.waitingPlayers.filter(p => p.connectionId !== connectionId);
 
+    // Remove from tournament queue if present
+    if (player.user && player.user.id) {
+      const removed = this.tournamentManager.removePlayerFromQueue(player.user.id);
+      if (removed) {
+        console.log(`🏆 Removed ${player.user.username} from tournament queue`);
+      }
+    }
+
     if (player.roomId) {
       const gameRoom = this.games.get(player.roomId);
       if (gameRoom) {
@@ -1022,7 +1030,7 @@ class GameManager {
       }
 
       console.log(`✅ Tournament match recorded: ${winnerData.user.username} defeats ${loserData.user.username}`);
-      
+
       // ========================================
       // USE MATCHMAKING'S PROVEN DATABASE UPDATE
       // ========================================
@@ -1044,13 +1052,13 @@ class GameManager {
         player2Data
       );
       
-      console.log(`�🚨🚨 WIN SCREEN DATA: ${winScreenData ? 'GENERATED ✅' : 'NULL ❌'} 🚨🚨�`);
+      console.log(`🚨🚨🚨 WIN SCREEN DATA: ${winScreenData ? 'GENERATED ✅' : 'NULL ❌'} 🚨🚨🚨`);
       
       // Use matchmaking's proven database update function
       await this.statsHandler.processGameCompletion(gameResult);
       
       console.log(`💰 Stats updated using matchmaking's database function`);
-      
+
       // ========================================
       // SEND TOURNAMENT-SPECIFIC WIN/LOSS SCREENS
       // ========================================
@@ -1059,7 +1067,7 @@ class GameManager {
       
       // Send tournament win screen to player 1
       if (winScreenData && player1Data.connection && player1Data.connection.readyState === 1) {
-        console.log(`🚨🚨� SENDING TOURNAMENT RESULT TO ${player1Data.user.username} 🚨🚨🚨`);
+        console.log(`🚨🚨🚨 SENDING TOURNAMENT RESULT TO ${player1Data.user.username} 🚨🚨🚨`);
         player1Data.connection.send(JSON.stringify({
           type: 'tournamentMatchResult',
           won: player1Won,
@@ -1086,7 +1094,7 @@ class GameManager {
       
       // Send tournament win screen to player 2
       if (winScreenData && player2Data.connection && player2Data.connection.readyState === 1) {
-        console.log(`�🚨🚨 SENDING TOURNAMENT RESULT TO ${player2Data.user.username} 🚨🚨🚨`);
+        console.log(`🚨🚨🚨 SENDING TOURNAMENT RESULT TO ${player2Data.user.username} 🚨🚨🚨`);
         player2Data.connection.send(JSON.stringify({
           type: 'tournamentMatchResult',
           won: !player1Won,

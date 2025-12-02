@@ -253,16 +253,16 @@ class TournamentManager {
   calculateRewards(round, outcome) {
     const rewards = {
       quarterFinals: {
-        winner: { rankPoints: 2, experience: 20 },
-        loser: { rankPoints: -5, experience: 10 }
+        winner: { rankPoints: 2, experience: 15 },
+        loser: { rankPoints: -5, experience: 5 }
       },
       semiFinals: {
-        winner: { rankPoints: 5, experience: 27 },
-        loser: { rankPoints: 0, experience: 15 }
+        winner: { rankPoints: 5, experience: 40 },
+        loser: { rankPoints: 0, experience: 25 }
       },
       finals: {
-        winner: { rankPoints: 10, experience: 40 },
-        loser: { rankPoints: 2, experience: 20 }
+        winner: { rankPoints: 10, experience: 100 },
+        loser: { rankPoints: 3, experience: 60 }
       }
     };
 
