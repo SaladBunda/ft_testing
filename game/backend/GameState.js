@@ -86,7 +86,7 @@ class GameState {
     let dy = Math.random() < 0.5 ? -this.baseSpeed : this.baseSpeed;
 
     this.gameState.ball = { x: CANVAS_WIDTH / 2, y: startY, dx: 0, dy: 0 };
-    this.gameState.countdown = 5; // 5 second countdown
+    this.gameState.countdown = 3; // 3 second countdown
     this.gameState.gameActive = false;
 
     // Reset paddles to center

@@ -292,7 +292,7 @@ class GameStatsHandler {
             const newLevelInfo = this.progression.calculateLevel(newXp);
             
             // Calculate new rank
-            const newRankInfo = this.progression.calculateRank(newRating);
+            const newRankInfo = this.progression.getRankInfo(newRating);
             
             // Update database - only RR, XP, and level, NOT game counts
             await this.userAuth.db.run(

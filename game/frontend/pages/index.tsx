@@ -370,9 +370,9 @@ export default function Home() {
     };
 
     ws.onmessage = (event) => {
-      console.log("📨 Received WebSocket message:", event.data);
+      // console.log("📨 Received WebSocket message:", event.data);
       const message = JSON.parse(event.data);
-      console.log("📨 Parsed message:", message);
+      // console.log("📨 Parsed message:", message);
 
       if (message.type === 'authError') {
         // Authentication failed
@@ -464,6 +464,7 @@ export default function Home() {
         
         // After 3 seconds, start the game
         setTimeout(() => {
+          console.log("🚨🚨🚨 STARTING GAME NOW 🚨🚨🚨");
           setScreen("game");
           
           const playerData = {
@@ -593,6 +594,11 @@ export default function Home() {
   };
 
   // This effect has been replaced by connectWebSocketWithMode
+
+  // Log screen changes for debugging
+  useEffect(() => {
+    console.log(`�🚨🚨 SCREEN: ${screen} 🚨🚨🚨`);
+  }, [screen]);
 
   // Set up keyboard controls
   useEffect(() => {

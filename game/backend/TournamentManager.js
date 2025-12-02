@@ -115,7 +115,7 @@ class TournamentManager {
       results: {
         quarterFinals: [],
         semiFinals: [],
-        finals: null
+        finals: []
       },
       champion: null
     };
@@ -235,7 +235,10 @@ class TournamentManager {
       }
     };
 
-    tournament.results[round === 'finals' ? 'finals' : round].push(result);
+    // Convert round name from snake_case to camelCase for results object
+    const resultsKey = round === 'quarter_finals' ? 'quarterFinals' : 
+                       round === 'semi_finals' ? 'semiFinals' : 'finals';
+    tournament.results[resultsKey].push(result);
 
     console.log(`✅ Match ${matchId} result: ${winner.user.username} defeats ${loser.user.username}`);
     console.log(`💰 Rewards - Winner: ${rewards.rankPoints} RR, ${rewards.experience} XP | Loser: ${loserRewards.rankPoints} RR, ${loserRewards.experience} XP`);

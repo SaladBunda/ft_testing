@@ -980,8 +980,7 @@ class GameManager {
     try {
       console.log(`🏆 Processing tournament match: ${gameRoom.matchId} in tournament ${gameRoom.tournamentId}`);
       
-      // Determine winner based on score
-      // gameState is the raw state object, not the class instance
+      // Get final scores
       const scores = {
         player1: gameRoom.finalScores?.player1Score || gameState.player1?.score || 0,
         player2: gameRoom.finalScores?.player2Score || gameState.player2?.score || 0
@@ -989,134 +988,149 @@ class GameManager {
       
       console.log(`📊 Tournament match scores: P1=${scores.player1}, P2=${scores.player2}`);
       
-      let winnerId = null;
-      let loserId = null;
-      
       // Get player IDs from connection IDs
       const playerIds = Array.from(gameRoom.players.keys());
       const player1Id = playerIds[0];
       const player2Id = playerIds[1];
       
-      if (scores.player1 > scores.player2) {
-        winnerId = player1Id;
-        loserId = player2Id;
-      } else if (scores.player2 > scores.player1) {
-        winnerId = player2Id;
-        loserId = player1Id;
-      } else {
-        // Tie - should not happen in tournament, but handle gracefully
-        console.log(`⚠️ Tournament match ${gameRoom.matchId} ended in a tie, using player1 as winner`);
-        winnerId = player1Id;
-        loserId = player2Id;
-      }
-
       // Get user data for both players
-      const winnerData = this.players.get(winnerId);
-      const loserData = this.players.get(loserId);
+      const player1Data = this.players.get(player1Id);
+      const player2Data = this.players.get(player2Id);
       
-      if (!winnerData || !loserData) {
+      if (!player1Data || !player2Data) {
         console.error('❌ Missing player data for tournament match');
         return;
       }
 
+      // Determine winner
+      const player1Won = scores.player1 > scores.player2;
+      const winnerId = player1Won ? player1Id : player2Id;
+      const loserId = player1Won ? player2Id : player1Id;
+      const winnerData = player1Won ? player1Data : player2Data;
+      const loserData = player1Won ? player2Data : player1Data;
+
       // Record match result in tournament manager
-      const result = this.tournamentManager.recordMatchResult(
+      const tournamentResult = this.tournamentManager.recordMatchResult(
         gameRoom.tournamentId,
         gameRoom.matchId,
         winnerData.user.id
       );
 
-      if (!result.success) {
-        console.error(`❌ Failed to record tournament match result: ${result.message}`);
+      if (!tournamentResult.success) {
+        console.error(`❌ Failed to record tournament match result: ${tournamentResult.message}`);
         return;
       }
 
       console.log(`✅ Tournament match recorded: ${winnerData.user.username} defeats ${loserData.user.username}`);
       
-      // Get stats BEFORE applying rewards
-      const winnerStatsBefore = await this.statsHandler.getPlayerStats(winnerData.user.id);
-      const loserStatsBefore = await this.statsHandler.getPlayerStats(loserData.user.id);
+      // ========================================
+      // USE MATCHMAKING'S PROVEN DATABASE UPDATE
+      // ========================================
       
-      // Apply tournament rewards to both players
-      const winnerRewards = result.winnerRewards;
-      const loserRewards = result.loserRewards;
+      // Create game result object (same format as matchmaking)
+      const gameResult = {
+        player1Id: player1Data.user.id,
+        player2Id: player2Data.user.id,
+        player1Score: scores.player1,
+        player2Score: scores.player2,
+        gameMode: 'tournament',
+        gameDuration: Math.floor((gameRoom.gameEndTime - gameRoom.gameStartTime) / 1000)
+      };
       
-      await this.statsHandler.applyTournamentRewards(winnerData.user.id, winnerRewards, true);
-      await this.statsHandler.applyTournamentRewards(loserData.user.id, loserRewards, false);
+      // Generate win screen data BEFORE updating database (gets before stats)
+      const winScreenData = await this.winScreenData.generateWinScreenData(
+        gameResult,
+        player1Data,
+        player2Data
+      );
       
-      console.log(`💰 Applied rewards - Winner: +${winnerRewards.rating_change} RR, +${winnerRewards.xp_gain} XP | Loser: ${loserRewards.rating_change} RR, ${loserRewards.xp_gain} XP`);
+      console.log(`�🚨🚨 WIN SCREEN DATA: ${winScreenData ? 'GENERATED ✅' : 'NULL ❌'} 🚨🚨�`);
       
-      // Get updated stats for both players
-      const winnerStats = await this.statsHandler.getPlayerStats(winnerData.user.id);
-      const loserStats = await this.statsHandler.getPlayerStats(loserData.user.id);
+      // Use matchmaking's proven database update function
+      await this.statsHandler.processGameCompletion(gameResult);
       
-      // Determine if winner needs to wait for next match
-      const hasNextRound = result.nextRound && !result.tournamentComplete;
+      console.log(`💰 Stats updated using matchmaking's database function`);
       
-      // Send match result to winner
-      if (winnerData.connection && winnerData.connection.readyState === 1) {
-        winnerData.connection.send(JSON.stringify({
+      // ========================================
+      // SEND TOURNAMENT-SPECIFIC WIN/LOSS SCREENS
+      // ========================================
+      
+      const hasNextRound = tournamentResult.nextRound && !tournamentResult.tournamentComplete;
+      
+      // Send tournament win screen to player 1
+      if (winScreenData && player1Data.connection && player1Data.connection.readyState === 1) {
+        console.log(`🚨🚨� SENDING TOURNAMENT RESULT TO ${player1Data.user.username} 🚨🚨🚨`);
+        player1Data.connection.send(JSON.stringify({
           type: 'tournamentMatchResult',
-          won: true,
-          opponentUsername: loserData.user.username,
-          ratingChange: winnerRewards.rating_change,
-          xpGain: winnerRewards.xp_gain,
-          round: result.nextRound || 'complete',
-          tournamentComplete: result.tournamentComplete || false,
-          isTournamentWinner: result.status === 'tournament_complete',
-          waitingForNextRound: hasNextRound,
+          won: player1Won,
+          opponentUsername: player2Data.user.username,
+          ratingChange: winScreenData.player1.rewards.rankPoints,
+          xpGain: winScreenData.player1.rewards.experience,
+          round: player1Won ? (tournamentResult.nextRound || 'complete') : 'eliminated',
+          tournamentComplete: player1Won ? (tournamentResult.tournamentComplete || false) : false,
+          isTournamentWinner: player1Won && (tournamentResult.status === 'tournament_complete'),
+          waitingForNextRound: player1Won && hasNextRound,
           stats: {
-            oldRating: winnerStatsBefore.rank_points,
-            newRating: winnerStats.rank_points,
-            oldXp: winnerStatsBefore.experience_points,
-            newXp: winnerStats.experience_points,
-            oldLevel: winnerStatsBefore.player_level,
-            newLevel: winnerStats.player_level,
-            totalMatches: winnerStats.games_played,
-            wins: winnerStats.games_won,
-            losses: winnerStats.games_lost
+            oldRating: winScreenData.player1.progression.before.rankPoints,
+            newRating: winScreenData.player1.progression.after.rankPoints,
+            oldXp: winScreenData.player1.progression.before.experience,
+            newXp: winScreenData.player1.progression.after.experience,
+            oldLevel: winScreenData.player1.progression.before.level,
+            newLevel: winScreenData.player1.progression.after.level,
+            totalMatches: winScreenData.player1.progression.after.gamesPlayed,
+            wins: winScreenData.player1.progression.after.gamesWon,
+            losses: winScreenData.player1.progression.after.gamesLost
           }
         }));
       }
       
-      // Send match result to loser
-      if (loserData.connection && loserData.connection.readyState === 1) {
-        loserData.connection.send(JSON.stringify({
+      // Send tournament win screen to player 2
+      if (winScreenData && player2Data.connection && player2Data.connection.readyState === 1) {
+        console.log(`�🚨🚨 SENDING TOURNAMENT RESULT TO ${player2Data.user.username} 🚨🚨🚨`);
+        player2Data.connection.send(JSON.stringify({
           type: 'tournamentMatchResult',
-          won: false,
-          opponentUsername: winnerData.user.username,
-          ratingChange: loserRewards.rating_change,
-          xpGain: loserRewards.xp_gain,
-          round: 'eliminated',
-          tournamentComplete: false, // Loser is out
-          isTournamentWinner: false,
-          waitingForNextRound: false,
+          won: !player1Won,
+          opponentUsername: player1Data.user.username,
+          ratingChange: winScreenData.player2.rewards.rankPoints,
+          xpGain: winScreenData.player2.rewards.experience,
+          round: !player1Won ? (tournamentResult.nextRound || 'complete') : 'eliminated',
+          tournamentComplete: !player1Won ? (tournamentResult.tournamentComplete || false) : false,
+          isTournamentWinner: !player1Won && (tournamentResult.status === 'tournament_complete'),
+          waitingForNextRound: !player1Won && hasNextRound,
           stats: {
-            oldRating: loserStatsBefore.rank_points,
-            newRating: loserStats.rank_points,
-            oldXp: loserStatsBefore.experience_points,
-            newXp: loserStats.experience_points,
-            oldLevel: loserStatsBefore.player_level,
-            newLevel: loserStats.player_level,
-            totalMatches: loserStats.games_played,
-            wins: loserStats.games_won,
-            losses: loserStats.games_lost
+            oldRating: winScreenData.player2.progression.before.rankPoints,
+            newRating: winScreenData.player2.progression.after.rankPoints,
+            oldXp: winScreenData.player2.progression.before.experience,
+            newXp: winScreenData.player2.progression.after.experience,
+            oldLevel: winScreenData.player2.progression.before.level,
+            newLevel: winScreenData.player2.progression.after.level,
+            totalMatches: winScreenData.player2.progression.after.gamesPlayed,
+            wins: winScreenData.player2.progression.after.gamesWon,
+            losses: winScreenData.player2.progression.after.gamesLost
           }
         }));
-        
-        // Update loser's role to 'waiting' so they can rejoin queue
-        this.players.set(loserId, {
-          ...loserData,
-          roomId: null,
-          role: 'waiting',
-          tournamentId: null,
-          matchId: null
-        });
       }
+      
+      // Update both players' states to 'waiting'
+      this.players.set(winnerId, {
+        ...winnerData,
+        roomId: null,
+        role: 'waiting',
+        matchId: null
+        // Keep tournamentId for next round
+      });
+      
+      this.players.set(loserId, {
+        ...loserData,
+        roomId: null,
+        role: 'waiting',
+        tournamentId: null,
+        matchId: null
+      });
       
       // If tournament is complete, notify winner
-      if (result.tournamentComplete && result.tournamentWinner) {
-        const championData = this.players.get(result.tournamentWinner.toString());
+      if (tournamentResult.tournamentComplete && tournamentResult.tournamentWinner) {
+        const championData = this.players.get(tournamentResult.tournamentWinner.toString());
         if (championData && championData.connection && championData.connection.readyState === 1) {
           championData.connection.send(JSON.stringify({
             type: 'tournamentChampion',
@@ -1126,8 +1140,8 @@ class GameManager {
       }
       
       // If tournament has next round, create next matches after a delay
-      if (result.nextRound && !result.tournamentComplete) {
-        console.log(`🎯 Tournament ${gameRoom.tournamentId} advancing to ${result.nextRound}`);
+      if (tournamentResult.nextRound && !tournamentResult.tournamentComplete) {
+        console.log(`🎯 Tournament ${gameRoom.tournamentId} advancing to ${tournamentResult.nextRound}`);
         setTimeout(() => {
           this.createTournamentMatches(this.tournamentManager.getTournament(gameRoom.tournamentId));
         }, 3000); // 3 second delay before next round
