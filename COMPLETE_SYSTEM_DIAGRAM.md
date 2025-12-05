@@ -1,0 +1,285 @@
+# Complete Game System - Mega Diagram
+
+## 📋 Instructions:
+**IMPORTANT:** Copy ONLY from the line that says ` ```mermaid ` down to the closing ` ``` ` 
+**DO NOT** copy the title or these instructions!
+
+---
+
+```mermaid
+flowchart TB
+    %% Authentication Layer
+    START([User Visits App]) --> LOGIN{Has Account?}
+    LOGIN -->|No| REGISTER[Register: POST /register]
+    LOGIN -->|Yes| SIGNIN[Login: POST /login]
+    
+    REGISTER --> AUTHDB[(Auth Database)]
+    SIGNIN --> AUTHDB
+    AUTHDB --> VERIFY{Credentials Valid?}
+    VERIFY -->|No| REJECT[Authentication Failed]
+    VERIFY -->|Yes| JWT[Generate JWT Token]
+    JWT --> COOKIE[Set httpOnly Cookie - 2h expiry]
+    COOKIE --> WSCONNECT[WebSocket Connection]
+    WSCONNECT --> WSAUTH{Verify JWT}
+    WSAUTH -->|Invalid| WSREJECT[Connection Rejected]
+    WSAUTH -->|Valid| AUTHENTICATED[User Authenticated ✓]
+    
+    %% Main Menu
+    AUTHENTICATED --> MAINMENU{Choose Game Mode}
+    
+    %% ====================
+    %% SOLO/COOP MODE PATH
+    %% ====================
+    MAINMENU -->|Solo/Coop| SOLO_JOIN[Send: join mode=solo]
+    SOLO_JOIN --> SOLO_CREATE[GameManager.createSoloGame]
+    SOLO_CREATE --> SOLO_STATE[GameState: Both paddles local]
+    SOLO_STATE --> SOLO_LOOP[Game Loop 16ms]
+    SOLO_LOOP --> SOLO_PLAY[Player controls both paddles]
+    SOLO_PLAY --> SOLO_CHECK{Score = 5?}
+    SOLO_CHECK -->|No| SOLO_LOOP
+    SOLO_CHECK -->|Yes| SOLO_END[Game Ends - No Stats Update]
+    SOLO_END --> MAINMENU
+    
+    %% ====================
+    %% AI MODE PATH
+    %% ====================
+    MAINMENU -->|AI Mode| AI_DIFF{Select Difficulty}
+    AI_DIFF -->|Easy| AI_JOIN1[difficulty=1]
+    AI_DIFF -->|Medium| AI_JOIN2[difficulty=2]
+    AI_DIFF -->|Hard| AI_JOIN3[difficulty=3]
+    AI_DIFF -->|Impossible| AI_JOIN4[difficulty=4]
+    
+    AI_JOIN1 --> AI_CREATE[GameManager.createAIGame]
+    AI_JOIN2 --> AI_CREATE
+    AI_JOIN3 --> AI_CREATE
+    AI_JOIN4 --> AI_CREATE
+    
+    AI_CREATE --> AI_INIT[Initialize AIPlayer]
+    AI_INIT --> AI_LOOP[Game Loop 16ms]
+    AI_LOOP --> AI_PLAYER[Player paddle: User input]
+    AI_LOOP --> AI_AI[AI paddle: AI logic]
+    AI_PLAYER --> AI_UPDATE[Update game state]
+    AI_AI --> AI_UPDATE
+    AI_UPDATE --> AI_SCORE{Score = 5?}
+    AI_SCORE -->|No| AI_LOOP
+    AI_SCORE -->|Yes| AI_END[Game Complete]
+    AI_END --> STATS_PROCESS
+    
+    %% ====================
+    %% MATCHMAKING MODE PATH
+    %% ====================
+    MAINMENU -->|Quick Match| MM_JOIN[Send: join mode=matchmaking]
+    MM_JOIN --> MM_ADD[GameManager.addPlayer]
+    MM_ADD --> MM_QUEUE[Add to waitingPlayers queue]
+    MM_QUEUE --> MM_CHECK{2 Players Waiting?}
+    MM_CHECK -->|No| MM_WAIT[Send: waiting message]
+    MM_WAIT --> MM_QUEUE
+    MM_CHECK -->|Yes| MM_MATCH[GameManager.matchPlayers]
+    MM_MATCH --> MM_CREATE[GameManager.createGame]
+    MM_CREATE --> MM_ROOM[Create game room]
+    MM_ROOM --> MM_NOTIFY[Send: gameJoined to both]
+    MM_NOTIFY --> MM_LOOP[Game Loop 16ms]
+    MM_LOOP --> MM_P1[Player 1: WebSocket input]
+    MM_LOOP --> MM_P2[Player 2: WebSocket input]
+    MM_P1 --> MM_STATE[Update GameState]
+    MM_P2 --> MM_STATE
+    MM_STATE --> MM_BROADCAST[Broadcast state to both clients]
+    MM_BROADCAST --> MM_SCORE{Score = 5?}
+    MM_SCORE -->|No| MM_LOOP
+    MM_SCORE -->|Yes| MM_END[Game Complete]
+    MM_END --> STATS_PROCESS
+    
+    %% ====================
+    %% TOURNAMENT MODE PATH
+    %% ====================
+    MAINMENU -->|Tournament| TOUR_JOIN[Send: join mode=tournament]
+    TOUR_JOIN --> TOUR_ADD[TournamentManager.addPlayerToQueue]
+    TOUR_ADD --> TOUR_QUEUE[playerQueue.push]
+    TOUR_QUEUE --> TOUR_NOTIFY[Send: tournamentQueued]
+    TOUR_NOTIFY --> TOUR_CHECK{8 Players?}
+    TOUR_CHECK -->|No| TOUR_WAIT[Show Queue Screen]
+    TOUR_WAIT --> TOUR_QUEUE
+    TOUR_CHECK -->|Yes| TOUR_START[TournamentManager.startTournament]
+    
+    TOUR_START --> TOUR_BRACKET[Create bracket structure]
+    TOUR_BRACKET --> TOUR_QUARTER[Quarter Finals: 4 matches]
+    
+    %% Quarter Finals
+    TOUR_QUARTER --> TOUR_CREATE_Q[GameManager.createTournamentMatches]
+    TOUR_CREATE_Q --> TOUR_ROOMS_Q[Create 4 game rooms]
+    TOUR_ROOMS_Q --> TOUR_READY_Q[Send: tournamentMatchReady]
+    TOUR_READY_Q --> TOUR_COUNTDOWN_Q[Frontend: 3 sec countdown]
+    TOUR_COUNTDOWN_Q --> TOUR_GAMES_Q[4 Games Running Simultaneously]
+    
+    TOUR_GAMES_Q --> TOUR_LOOP_Q[Game Loop 16ms for each match]
+    TOUR_LOOP_Q --> TOUR_PLAY_Q[Players compete]
+    TOUR_PLAY_Q --> TOUR_SCORE_Q{Score = 5?}
+    TOUR_SCORE_Q -->|No| TOUR_LOOP_Q
+    TOUR_SCORE_Q -->|Yes| TOUR_END_Q[Match Ends]
+    
+    TOUR_END_Q --> TOUR_PROCESS_Q[processTournamentMatch]
+    TOUR_PROCESS_Q --> TOUR_RECORD_Q[TournamentManager.recordMatchResult]
+    TOUR_RECORD_Q --> TOUR_REWARD_Q[calculateRewards: Quarter]
+    TOUR_REWARD_Q --> TOUR_STATS_Q[GameStatsHandler.processGameCompletion]
+    TOUR_STATS_Q --> TOUR_DB_Q[(Update Database)]
+    TOUR_DB_Q --> TOUR_WIN_Q[WinScreenData.generate]
+    TOUR_WIN_Q --> TOUR_RESULT_Q[Send: tournamentMatchResult]
+    TOUR_RESULT_Q --> TOUR_SCREEN_Q{Winner or Loser?}
+    TOUR_SCREEN_Q -->|Winner| TOUR_WAIT_Q[Winner: +2 RR/+15 XP<br/>tournamentWaiting 10 sec]
+    TOUR_SCREEN_Q -->|Loser| TOUR_ELIM_Q[Loser: -5 RR/+5 XP<br/>Eliminated ❌]
+    
+    TOUR_WAIT_Q --> TOUR_ALL_Q{All 4 Matches Done?}
+    TOUR_ALL_Q -->|No| TOUR_WAIT_Q
+    TOUR_ALL_Q -->|Yes| TOUR_ADVANCE_S[advanceTournament]
+    
+    %% Semi Finals
+    TOUR_ADVANCE_S --> TOUR_SEMI[Semi Finals: 2 matches]
+    TOUR_SEMI --> TOUR_CREATE_S[Create 2 game rooms]
+    TOUR_CREATE_S --> TOUR_READY_S[Send: tournamentMatchReady]
+    TOUR_READY_S --> TOUR_COUNTDOWN_S[Frontend: 3 sec countdown]
+    TOUR_COUNTDOWN_S --> TOUR_GAMES_S[2 Games Running]
+    
+    TOUR_GAMES_S --> TOUR_LOOP_S[Game Loop 16ms]
+    TOUR_LOOP_S --> TOUR_PLAY_S[Players compete]
+    TOUR_PLAY_S --> TOUR_SCORE_S{Score = 5?}
+    TOUR_SCORE_S -->|No| TOUR_LOOP_S
+    TOUR_SCORE_S -->|Yes| TOUR_END_S[Match Ends]
+    
+    TOUR_END_S --> TOUR_PROCESS_S[processTournamentMatch]
+    TOUR_PROCESS_S --> TOUR_RECORD_S[recordMatchResult]
+    TOUR_RECORD_S --> TOUR_REWARD_S[calculateRewards: Semi]
+    TOUR_REWARD_S --> TOUR_STATS_S[processGameCompletion]
+    TOUR_STATS_S --> TOUR_DB_S[(Update Database)]
+    TOUR_DB_S --> TOUR_WIN_S[generateWinScreenData]
+    TOUR_WIN_S --> TOUR_RESULT_S[Send: tournamentMatchResult]
+    TOUR_RESULT_S --> TOUR_SCREEN_S{Winner or Loser?}
+    TOUR_SCREEN_S -->|Winner| TOUR_WAIT_S[Winner: +5 RR/+40 XP<br/>tournamentWaiting 10 sec]
+    TOUR_SCREEN_S -->|Loser| TOUR_ELIM_S[Loser: +0 RR/+25 XP<br/>Eliminated ❌]
+    
+    TOUR_WAIT_S --> TOUR_ALL_S{Both Matches Done?}
+    TOUR_ALL_S -->|No| TOUR_WAIT_S
+    TOUR_ALL_S -->|Yes| TOUR_ADVANCE_F[advanceTournament]
+    
+    %% Finals
+    TOUR_ADVANCE_F --> TOUR_FINALS[Finals: 1 match]
+    TOUR_FINALS --> TOUR_CREATE_F[Create championship room]
+    TOUR_CREATE_F --> TOUR_READY_F[Send: tournamentMatchReady]
+    TOUR_READY_F --> TOUR_COUNTDOWN_F[Frontend: 3 sec countdown]
+    TOUR_COUNTDOWN_F --> TOUR_GAME_F[Championship Game!]
+    
+    TOUR_GAME_F --> TOUR_LOOP_F[Game Loop 16ms]
+    TOUR_LOOP_F --> TOUR_PLAY_F[Players compete]
+    TOUR_PLAY_F --> TOUR_SCORE_F{Score = 5?}
+    TOUR_SCORE_F -->|No| TOUR_LOOP_F
+    TOUR_SCORE_F -->|Yes| TOUR_END_F[Finals Complete!]
+    
+    TOUR_END_F --> TOUR_PROCESS_F[processTournamentMatch]
+    TOUR_PROCESS_F --> TOUR_RECORD_F[recordMatchResult]
+    TOUR_RECORD_F --> TOUR_REWARD_F[calculateRewards: Finals]
+    TOUR_REWARD_F --> TOUR_STATS_F[processGameCompletion]
+    TOUR_STATS_F --> TOUR_DB_F[(Update Database)]
+    TOUR_DB_F --> TOUR_WIN_F[generateWinScreenData]
+    TOUR_WIN_F --> TOUR_RESULT_F[Send: tournamentMatchResult]
+    TOUR_RESULT_F --> TOUR_SCREEN_F{Winner or Loser?}
+    TOUR_SCREEN_F -->|Winner| TOUR_CHAMPION[Champion: +10 RR/+100 XP<br/>Send: tournamentChampion<br/>🏆 Trophy!]
+    TOUR_SCREEN_F -->|Loser| TOUR_RUNNER[Runner-up: +3 RR/+60 XP<br/>2nd Place 🥈]
+    
+    TOUR_CHAMPION --> MAINMENU
+    TOUR_RUNNER --> MAINMENU
+    TOUR_ELIM_Q --> MAINMENU
+    TOUR_ELIM_S --> MAINMENU
+    
+    %% ====================
+    %% STATS PROCESSING (Shared by AI & Matchmaking)
+    %% ====================
+    STATS_PROCESS[GameStatsHandler.processGameCompletion] --> STATS_BEFORE[Fetch before stats from DB]
+    STATS_BEFORE --> STATS_WINNER{Determine Winner}
+    STATS_WINNER --> STATS_STREAK[Update streaks]
+    STATS_STREAK --> STATS_CALC[calculateGameRewards]
+    STATS_CALC --> STATS_WIN[Winner: +3 to +5 RR<br/>+15 to +30 XP<br/>based on streak]
+    STATS_CALC --> STATS_LOSE[Loser: -2 to -4 RR<br/>+5 to +10 XP]
+    
+    STATS_WIN --> STATS_APPLY[Apply rewards]
+    STATS_LOSE --> STATS_APPLY
+    STATS_APPLY --> STATS_LEVEL[calculateLevel]
+    STATS_LEVEL --> STATS_CHECK{Level Up?}
+    STATS_CHECK -->|Yes| STATS_LEVELUP[Increment player_level]
+    STATS_CHECK -->|No| STATS_NOLEVEL[Keep current level]
+    
+    STATS_LEVELUP --> STATS_DB[(UPDATE users SET<br/>rank_points<br/>experience_points<br/>player_level<br/>games_played<br/>games_won/lost<br/>current_streak)]
+    STATS_NOLEVEL --> STATS_DB
+    
+    STATS_DB --> STATS_AFTER[Fetch after stats]
+    STATS_AFTER --> STATS_GEN[WinScreenData.generate]
+    STATS_GEN --> STATS_COMPARE[Calculate before/after changes]
+    STATS_COMPARE --> STATS_SEND[Send: gameResult with winScreenData]
+    STATS_SEND --> STATS_DISPLAY[Frontend: Display Win/Loss Screen]
+    STATS_DISPLAY --> MAINMENU
+    
+    %% ====================
+    %% DISCONNECT HANDLING
+    %% ====================
+    WSCONNECT -.Player Disconnects.-> DC_CHECK{In Active Game?}
+    DC_CHECK -->|No| DC_QUEUE[Remove from queue]
+    DC_CHECK -->|Yes| DC_PROGRESS{Game has progress?}
+    DC_PROGRESS -->|No score yet| DC_ABORT[Abort game<br/>No stats update]
+    DC_PROGRESS -->|Score exists| DC_AWARD[Award win to opponent<br/>Update stats]
+    DC_AWARD --> STATS_PROCESS
+    DC_ABORT --> MAINMENU
+    DC_QUEUE --> MAINMENU
+    
+    %% ====================
+    %% QUEUE CANCEL
+    %% ====================
+    MM_WAIT -.Cancel.-> CANCEL_MM[Send: cancel]
+    TOUR_WAIT -.Leave Queue.-> CANCEL_TOUR[Send: cancel]
+    CANCEL_MM --> REMOVE_MM[GameManager.removePlayer]
+    CANCEL_TOUR --> REMOVE_TOUR[TournamentManager.removePlayerFromQueue]
+    REMOVE_MM --> CONFIRM[Send: matchCancelled]
+    REMOVE_TOUR --> CONFIRM
+    CONFIRM --> MAINMENU
+    
+    %% Styling
+    classDef authStyle fill:#e1f5ff,stroke:#01579b,stroke-width:2px
+    classDef soloStyle fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    classDef aiStyle fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
+    classDef mmStyle fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
+    classDef tourStyle fill:#fff9c4,stroke:#f57f17,stroke-width:2px
+    classDef statsStyle fill:#fce4ec,stroke:#880e4f,stroke-width:2px
+    classDef dbStyle fill:#e0e0e0,stroke:#212121,stroke-width:3px
+    classDef endStyle fill:#c8e6c9,stroke:#2e7d32,stroke-width:3px
+    
+    class START,LOGIN,REGISTER,SIGNIN,AUTHDB,VERIFY,JWT,COOKIE,WSCONNECT,WSAUTH,AUTHENTICATED authStyle
+    class SOLO_JOIN,SOLO_CREATE,SOLO_STATE,SOLO_LOOP,SOLO_PLAY,SOLO_CHECK,SOLO_END soloStyle
+    class AI_DIFF,AI_JOIN1,AI_JOIN2,AI_JOIN3,AI_JOIN4,AI_CREATE,AI_INIT,AI_LOOP,AI_PLAYER,AI_AI,AI_UPDATE,AI_SCORE,AI_END aiStyle
+    class MM_JOIN,MM_ADD,MM_QUEUE,MM_CHECK,MM_WAIT,MM_MATCH,MM_CREATE,MM_ROOM,MM_NOTIFY,MM_LOOP,MM_P1,MM_P2,MM_STATE,MM_BROADCAST,MM_SCORE,MM_END mmStyle
+    class TOUR_JOIN,TOUR_ADD,TOUR_QUEUE,TOUR_NOTIFY,TOUR_CHECK,TOUR_WAIT,TOUR_START,TOUR_BRACKET,TOUR_QUARTER,TOUR_CREATE_Q,TOUR_ROOMS_Q,TOUR_READY_Q,TOUR_COUNTDOWN_Q,TOUR_GAMES_Q,TOUR_LOOP_Q,TOUR_PLAY_Q,TOUR_SCORE_Q,TOUR_END_Q,TOUR_PROCESS_Q,TOUR_RECORD_Q,TOUR_REWARD_Q,TOUR_STATS_Q,TOUR_DB_Q,TOUR_WIN_Q,TOUR_RESULT_Q,TOUR_SCREEN_Q,TOUR_WAIT_Q,TOUR_ELIM_Q,TOUR_ALL_Q,TOUR_ADVANCE_S,TOUR_SEMI,TOUR_CREATE_S,TOUR_READY_S,TOUR_COUNTDOWN_S,TOUR_GAMES_S,TOUR_LOOP_S,TOUR_PLAY_S,TOUR_SCORE_S,TOUR_END_S,TOUR_PROCESS_S,TOUR_RECORD_S,TOUR_REWARD_S,TOUR_STATS_S,TOUR_DB_S,TOUR_WIN_S,TOUR_RESULT_S,TOUR_SCREEN_S,TOUR_WAIT_S,TOUR_ELIM_S,TOUR_ALL_S,TOUR_ADVANCE_F,TOUR_FINALS,TOUR_CREATE_F,TOUR_READY_F,TOUR_COUNTDOWN_F,TOUR_GAME_F,TOUR_LOOP_F,TOUR_PLAY_F,TOUR_SCORE_F,TOUR_END_F,TOUR_PROCESS_F,TOUR_RECORD_F,TOUR_REWARD_F,TOUR_STATS_F,TOUR_DB_F,TOUR_WIN_F,TOUR_RESULT_F,TOUR_SCREEN_F tourStyle
+    class STATS_PROCESS,STATS_BEFORE,STATS_WINNER,STATS_STREAK,STATS_CALC,STATS_WIN,STATS_LOSE,STATS_APPLY,STATS_LEVEL,STATS_CHECK,STATS_LEVELUP,STATS_NOLEVEL,STATS_AFTER,STATS_GEN,STATS_COMPARE,STATS_SEND,STATS_DISPLAY statsStyle
+    class AUTHDB,TOUR_DB_Q,TOUR_DB_S,TOUR_DB_F,STATS_DB dbStyle
+    class TOUR_CHAMPION,TOUR_RUNNER endStyle
+```
+
+---
+
+## 📊 Diagram Legend
+
+**Color Coding:**
+- 🔵 **Blue** - Authentication Layer
+- 🟠 **Orange** - Solo/Coop Mode
+- 🟣 **Purple** - AI Mode
+- 🟢 **Green** - Matchmaking Mode
+- 🟡 **Yellow** - Tournament Mode
+- 🔴 **Pink** - Stats Processing
+- ⚫ **Gray** - Database Operations
+- 🎯 **Green (Bold)** - Victory/End States
+
+**Key Features:**
+- Shows complete flow from login to game completion
+- All 4 game modes included
+- Tournament progression through all rounds (Quarters → Semis → Finals)
+- Stats processing and reward calculations
+- Disconnect and cancel handling
+- Database update points
+- Return paths to main menu
+
+**Copy the entire mermaid block above and paste it into https://mermaid.live to see the complete interactive diagram!**

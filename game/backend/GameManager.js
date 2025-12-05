@@ -933,13 +933,7 @@ class GameManager {
               
               console.log(`🏆 Awarding win by disconnection: ${winnerData.user.username} defeats ${disconnectedData.user.username} (${winnerScore}-${loserScore})`);
               
-              // Check if this is a tournament match
-              if (gameRoom.mode === 'tournament') {
-                console.log(`🏆 Tournament match - will be processed as tournament result`);
-                // Tournament matches are processed by processTournamentMatch in updateAllGames
-              }
-              
-              // Notify winner
+              // Notify winner immediately
               if (winnerData.connection && winnerData.connection.readyState === 1) {
                 winnerData.connection.send(JSON.stringify({
                   type: 'opponentDisconnected',
@@ -948,7 +942,23 @@ class GameManager {
                 }));
               }
               
-              // Game will be processed normally by updateAllGames()
+              // Mark as processed to prevent duplicate processing
+              gameRoom.gameProcessed = true;
+              
+              // Immediately process game completion
+              if (gameRoom.mode === 'tournament') {
+                console.log(`🏆 Tournament match - processing tournament result immediately`);
+                // Process tournament match immediately
+                this.processTournamentMatch(player.roomId, gameRoom, currentState).catch(err => {
+                  console.error(`❌ Error processing tournament match on disconnect:`, err);
+                });
+              } else {
+                console.log(`🏆 Matchmaking/AI match - processing game completion immediately`);
+                // Process regular game completion immediately
+                this.processGameCompletion(player.roomId, gameRoom, currentState).catch(err => {
+                  console.error(`❌ Error processing game completion on disconnect:`, err);
+                });
+              }
             }
           }
         }
@@ -1312,9 +1322,9 @@ class GameManager {
         }
       });
 
-      // Process stats for any authenticated players (including disconnected scenarios)
-      if (gameResult.player1Id || gameResult.player2Id) {
-        console.log(`🏆 Processing stats for game result:`, gameResult);
+      // Process stats ONLY for matchmaking mode (not solo/ai)
+      if ((gameResult.player1Id || gameResult.player2Id) && gameMode === 'matchmaking') {
+        console.log(`🏆 Processing stats for matchmaking game:`, gameResult);
         
         // Generate win screen data BEFORE applying stats (to show before/after comparison)
         const winScreenData = await this.winScreenData.generateWinScreenData(
@@ -1343,6 +1353,8 @@ class GameManager {
         
         // Send updated stats to connected players
         await this.sendUpdatedStats(actualPlayer1Info, actualPlayer2Info, gameMode);
+      } else if (gameMode === 'solo' || gameMode === 'ai') {
+        console.log(`⚠️ Skipping stats update for ${gameMode} mode - practice mode only`);
       } else {
         console.log(`⚠️ Skipping stats update - missing player IDs`);
       }
