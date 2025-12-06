@@ -55,12 +55,12 @@ class GameManager {
   }
 
   // Add a new authenticated player connection
-  addAuthenticatedPlayer(connection, user, gameMode = 'matchmaking', aiDifficulty = null) {
+  async addAuthenticatedPlayer(connection, user, gameMode = 'matchmaking', aiDifficulty = null) {
     // Check if user is already connected
     const existingPlayer = this.findPlayerByUserId(user.id);
     if (existingPlayer) {
       console.log(`User ${user.username} is already connected, disconnecting old connection`);
-      this.removePlayer(existingPlayer.connectionId);
+      await this.removePlayer(existingPlayer.connectionId);
     }
 
     const connectionId = this.generateConnectionId();
@@ -673,7 +673,7 @@ class GameManager {
   }
 
   // Update all games
-  updateAllGames() {
+  async updateAllGames() {
     for (const [roomId, gameRoom] of this.games) {
       const gameState = gameRoom.gameState.getState();
       const wasActive = gameRoom.wasActive !== false; // Track if game was previously active
@@ -767,31 +767,60 @@ class GameManager {
       gameRoom.gameLoop.updateGame();
       
       // Broadcast to all players in this room
-      this.broadcastToRoom(roomId, gameState);
+      await this.broadcastToRoom(roomId, gameState);
     }
   }
 
   // Broadcast message to all players in a room
-  broadcastToRoom(roomId, message) {
+  async broadcastToRoom(roomId, message) {
     const gameRoom = this.games.get(roomId);
     if (!gameRoom) return;
 
     const messageStr = JSON.stringify(message);
+    const deadConnections = [];
     
     // Send to all players
     for (const connectionId of gameRoom.players) {
       const player = this.players.get(connectionId);
-      if (player && player.connection.readyState === 1) { // WebSocket.OPEN
+      if (!player) continue;
+      
+      // Check connection state
+      if (player.connection.readyState !== 1) { // Not OPEN
+        console.log(`Connection ${connectionId} not open (state: ${player.connection.readyState}), removing player`);
+        deadConnections.push(connectionId);
+        continue;
+      }
+      
+      try {
         player.connection.send(messageStr);
+      } catch (error) {
+        console.log(`Failed to send to ${connectionId}: ${error.message}, removing player`);
+        deadConnections.push(connectionId);
       }
     }
     
     // Send to spectators
     for (const connectionId of gameRoom.spectators) {
       const spectator = this.players.get(connectionId);
-      if (spectator && spectator.connection.readyState === 1) {
-        spectator.connection.send(messageStr);
+      if (!spectator) continue;
+      
+      if (spectator.connection.readyState !== 1) {
+        deadConnections.push(connectionId);
+        continue;
       }
+      
+      try {
+        spectator.connection.send(messageStr);
+      } catch (error) {
+        console.log(`Failed to send to spectator ${connectionId}: ${error.message}`);
+        deadConnections.push(connectionId);
+      }
+    }
+    
+    // Remove dead connections
+    for (const connectionId of deadConnections) {
+      console.log(`Removing dead connection: ${connectionId}`);
+      await this.removePlayer(connectionId);
     }
   }
 
@@ -834,7 +863,7 @@ class GameManager {
   }
 
   // Remove player and clean up
-  removePlayer(connectionId) {
+  async removePlayer(connectionId) {
     const player = this.players.get(connectionId);
     if (!player) return;
 
@@ -933,31 +962,52 @@ class GameManager {
               
               console.log(`🏆 Awarding win by disconnection: ${winnerData.user.username} defeats ${disconnectedData.user.username} (${winnerScore}-${loserScore})`);
               
-              // Notify winner immediately
+              // Send final game state to winner immediately showing they won
               if (winnerData.connection && winnerData.connection.readyState === 1) {
                 winnerData.connection.send(JSON.stringify({
-                  type: 'opponentDisconnected',
-                  message: 'Your opponent disconnected. You win!',
-                  winner: true
+                  type: 'gameState',
+                  state: currentState
                 }));
+                console.log(`📤 Sent final game state to winner ${winnerData.user.username}`);
+              }
+              
+              // Stop the game loop for this room
+              if (gameRoom.gameInterval) {
+                clearInterval(gameRoom.gameInterval);
+                gameRoom.gameInterval = null;
+                console.log(`⏹️ Stopped game loop for ${player.roomId}`);
               }
               
               // Mark as processed to prevent duplicate processing
               gameRoom.gameProcessed = true;
               
-              // Immediately process game completion
+              // Store disconnected player info for stats processing
+              gameRoom.disconnectedPlayer = disconnectedData;
+              console.log(`💾 Stored disconnected player info: ${disconnectedData.user.username} (role: ${disconnectedData.role})`);
+              
+              // Immediately process game completion to generate win screen
               if (gameRoom.mode === 'tournament') {
                 console.log(`🏆 Tournament match - processing tournament result immediately`);
                 // Process tournament match immediately
-                this.processTournamentMatch(player.roomId, gameRoom, currentState).catch(err => {
+                await this.processTournamentMatch(player.roomId, gameRoom, currentState).catch(err => {
                   console.error(`❌ Error processing tournament match on disconnect:`, err);
                 });
-              } else {
-                console.log(`🏆 Matchmaking/AI match - processing game completion immediately`);
-                // Process regular game completion immediately
-                this.processGameCompletion(player.roomId, gameRoom, currentState).catch(err => {
+              } else if (gameRoom.mode === 'multiplayer') {
+                console.log(`🏆 Multiplayer/Matchmaking match - processing game completion immediately`);
+                // Process regular game completion immediately (this sends win screen)
+                await this.processGameCompletion(player.roomId, gameRoom, currentState).catch(err => {
                   console.error(`❌ Error processing game completion on disconnect:`, err);
                 });
+              } else {
+                // Solo/AI mode - just notify and end
+                console.log(`⚠️ Solo/AI mode disconnect - no stats update needed`);
+                if (winnerData.connection && winnerData.connection.readyState === 1) {
+                  winnerData.connection.send(JSON.stringify({
+                    type: 'opponentDisconnected',
+                    message: 'Opponent disconnected. Game ended.',
+                    winner: true
+                  }));
+                }
               }
             }
           }
@@ -1200,20 +1250,34 @@ class GameManager {
       const players = Array.from(gameRoom.players);
       console.log(`👥 Players in room: ${players.length}`);
       
-      // Process stats even if only 1 player (disconnection = loss for disconnected player)
-      if (players.length === 0) {
+      // Check if we have a disconnected player stored
+      let allPlayersList = [];
+      for (const playerId of players) {
+        const playerData = this.players.get(playerId);
+        if (playerData) allPlayersList.push(playerData);
+      }
+      
+      // Add disconnected player if available
+      if (gameRoom.disconnectedPlayer) {
+        console.log(`📥 Found disconnected player: ${gameRoom.disconnectedPlayer.user.username} (role: ${gameRoom.disconnectedPlayer.role})`);
+        allPlayersList.push(gameRoom.disconnectedPlayer);
+      }
+      
+      console.log(`👥 Total players (including disconnected): ${allPlayersList.length}`);
+      
+      // Process stats even if only 1 player connected (disconnection = loss for disconnected player)
+      if (allPlayersList.length === 0) {
         console.log(`⚠️ No players found for game ${roomId}, skipping`);
         return;
       }
 
-      // Get player data - handle disconnected players gracefully
-      const player1Info = this.players.get(players[0]);
-      const player2Info = players[1] ? this.players.get(players[1]) : null;
+      // Map players by role
+      const player1Info = allPlayersList.find(p => p.role === 'player1');
+      const player2Info = allPlayersList.find(p => p.role === 'player2');
 
-      console.log(`👥 Player info: P1=${!!player1Info} P2=${!!player2Info}`);
+      console.log(`👥 Player info by role: P1=${player1Info?.user?.username || 'null'} P2=${player2Info?.user?.username || 'null'}`);
 
-      // For disconnected players, we still want to process stats
-      // If only 1 player, they win by default
+      // We need at least one player
       if (!player1Info && !player2Info) {
         console.log(`⚠️ No valid player info for game ${roomId}`);
         return;
@@ -1227,54 +1291,16 @@ class GameManager {
         gameMode = 'ai';
       }
 
-      // Create game result object - Map players correctly, handling disconnections
-      let actualPlayer1Info, actualPlayer2Info;
-      let actualPlayer1Score, actualPlayer2Score;
-      
-      // Handle cases where one or both players might have disconnected
-      if (player1Info && player2Info) {
-        // Both players present - use normal role mapping
-        if (player1Info.role === 'player1' && player2Info.role === 'player2') {
-          actualPlayer1Info = player1Info;
-          actualPlayer2Info = player2Info;
-          actualPlayer1Score = gameState.player1.score;
-          actualPlayer2Score = gameState.player2.score;
-        } else if (player1Info.role === 'player2' && player2Info.role === 'player1') {
-          // FIXED: Swap both players AND their scores
-          actualPlayer1Info = player2Info;  // player2Info has role 'player1'
-          actualPlayer2Info = player1Info;  // player1Info has role 'player2'
-          actualPlayer1Score = gameState.player1.score;  // player1 score goes to actual player1
-          actualPlayer2Score = gameState.player2.score;  // player2 score goes to actual player2
-        } else {
-          // Fallback mapping
-          const playerList = [player1Info, player2Info];
-          actualPlayer1Info = playerList.find(p => p.role === 'player1') || player1Info;
-          actualPlayer2Info = playerList.find(p => p.role === 'player2') || player2Info;
-          actualPlayer1Score = gameState.player1.score;
-          actualPlayer2Score = gameState.player2.score;
-        }
-      } else if (player1Info && !player2Info) {
-        // Only player1 present
-        actualPlayer1Info = player1Info.role === 'player1' ? player1Info : null;
-        actualPlayer2Info = player1Info.role === 'player2' ? player1Info : null;
-        actualPlayer1Score = gameState.player1.score;
-        actualPlayer2Score = gameState.player2.score;
-      } else if (!player1Info && player2Info) {
-        // Only player2 present  
-        actualPlayer1Info = player2Info.role === 'player1' ? player2Info : null;
-        actualPlayer2Info = player2Info.role === 'player2' ? player2Info : null;
-        actualPlayer1Score = gameState.player1.score;
-        actualPlayer2Score = gameState.player2.score;
-      } else {
-        console.log(`❌ No valid players for ${roomId}`);
-        return;
-      }
+      // Map players to actual roles - now simplified since we found them by role
+      const actualPlayer1Info = player1Info;
+      const actualPlayer2Info = player2Info;
+      const actualPlayer1Score = gameState.player1.score;
+      const actualPlayer2Score = gameState.player2.score;
 
-      console.log(`🔍 Role debugging:`, {
-        originalPlayer1: player1Info ? `${player1Info.user?.username} (role: ${player1Info.role})` : 'DISCONNECTED',
-        originalPlayer2: player2Info ? `${player2Info.user?.username} (role: ${player2Info.role})` : 'DISCONNECTED',
-        mappedPlayer1: actualPlayer1Info ? `${actualPlayer1Info.user?.username} (role: ${actualPlayer1Info.role})` : 'NULL',
-        mappedPlayer2: actualPlayer2Info ? `${actualPlayer2Info.user?.username} (role: ${actualPlayer2Info.role})` : 'NULL'
+      console.log(`🔍 Role mapping:`, {
+        player1: actualPlayer1Info ? `${actualPlayer1Info.user?.username} (role: ${actualPlayer1Info.role})` : 'NULL',
+        player2: actualPlayer2Info ? `${actualPlayer2Info.user?.username} (role: ${actualPlayer2Info.role})` : 'NULL',
+        scores: `${actualPlayer1Score}-${actualPlayer2Score}`
       });
 
       const gameResult = {

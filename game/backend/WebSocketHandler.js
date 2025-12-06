@@ -84,7 +84,7 @@ class WebSocketHandler {
             
             if (gameMode === 'matchmaking') {
               // Use authenticated matchmaking
-              const result = this.gameManager.addAuthenticatedPlayer(
+              const result = await this.gameManager.addAuthenticatedPlayer(
                 connection.socket, 
                 user, 
                 'matchmaking'
@@ -153,7 +153,7 @@ class WebSocketHandler {
             } else if (gameMode === 'solo' || gameMode === 'ai') {
               // Create solo/AI game with authentication
               const aiDifficulty = data.aiDifficulty || 'medium';
-              const result = this.gameManager.addAuthenticatedPlayer(
+              const result = await this.gameManager.addAuthenticatedPlayer(
                 connection.socket, 
                 user,
                 gameMode,
@@ -224,7 +224,7 @@ class WebSocketHandler {
             // Handle matchmaking cancellation
             console.log(`🚫 User ${user.username} (${user.id}) cancelled matchmaking`);
             // Remove player from matchmaking queue and any games
-            this.gameManager.removePlayer(connection.id);
+            await this.gameManager.removePlayer(connection.id);
             
             // Send cancellation confirmation
             connection.socket.send(JSON.stringify({
@@ -248,7 +248,7 @@ class WebSocketHandler {
           await this.userAuth.setUserOnlineStatus(user.id, false);
           
           // Remove player from game using connection.id
-          this.gameManager.removePlayer(connection.id);
+          await this.gameManager.removePlayer(connection.id);
         });
       });
     });
